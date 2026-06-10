@@ -1,0 +1,16 @@
+[project]
+repository-type = "documentation"
+versioning-scheme = "semver"
+branching-model = "docs-single-branch"
+release-model = "none"
+
+[ci]
+versions = ["latest"]
+integration-tests = false
+
+[publish]
+release = false
+docs = true
+
+[dependencies]
+vergil = "v2.1"
