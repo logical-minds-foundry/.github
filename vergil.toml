@@ -1,6 +1,6 @@
 [project]
 repository-type = "documentation"
-versioning-scheme = "semver"
+versioning-scheme = "none"
 branching-model = "docs-single-branch"
 release-model = "none"
 
@@ -10,7 +10,7 @@ integration-tests = false
 
 [publish]
 release = false
-docs = true
+docs = false
 
 [dependencies]
 vergil = "v2.1"
