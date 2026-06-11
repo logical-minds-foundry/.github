@@ -22,7 +22,7 @@ jobs:
   quality:
     uses: vergil-project/vergil-actions/.github/workflows/ci-quality.yml@v2.1
     with:
-      language: 
+      language: shell
       versions: '["latest"]'
       container-tag: 'latest'
       container-suffix: base
@@ -36,7 +36,7 @@ jobs:
       # needs it on private repos. See vergil-project/vergil-actions#698.
       actions: read
     with:
-      language: 
+      language: shell
       run-standards: ${{ inputs.run-release != 'false' }}
       run-security: ${{ inputs.run-security != 'false' }}
       container-tag: 'latest'
