@@ -118,7 +118,9 @@ material pads the front.
 
 ## 5. Home & DocsTree integration
 
-- **New tree: `docs/guides/`.** One file per guide, named `mq-<topic>-guide.md`.
+- **New tree: `docs/site/docs/guides/`** — under the published mkdocs `docs_dir`,
+  so the guides render as a real site section. (Repo-root `docs/` is not part of
+  the mkdocs build.) One file per guide, named `mq-<topic>-guide.md`.
 - **Distinct from `docs/reference/`.** The reference tree holds lab-specific
   material (real hostnames, shell blocks — e.g. the `nativeha-crr-*` guides).
   The guides tree is 100% generic and shareable. Different audience, different
@@ -133,8 +135,8 @@ material pads the front.
 Establish the mold before mass-producing:
 - Write the template and authoring conventions: the two-layer structure, the
   content-boundary rule (§3), the recommendation-ranking convention (§2).
-- Create the `docs/guides/` tree and the DocsTree "Guides" index page + nav
-  entry (§5).
+- Create the `docs/site/docs/guides/` tree and the DocsTree "Guides" index page +
+  nav entry (§5).
 - **Retrofit `mq-json-logging-config.md` to the template** as the worked example
   that proves the structure. This **is** the JSON diagnostic logging guide
   (formerly a separate Task 4, now folded in): promoting the prototype to the
@@ -166,6 +168,11 @@ Seed as tasks so the epic has visible runway:
 - Log-shipping pipeline (MQ JSON → journal/syslog → SIEM), generic
 - Certificate / PKI & cert-label management (addresses the open "are we
   over-using cert labels" question)
+- MQ ↔ DNS interaction & dependencies — which addresses must be resolvable
+  (forward and reverse), DNS's role in `CONNAME` / cluster-receiver CONNAMEs /
+  `CHLAUTH`-by-hostname / HA-VIP / client (CCDT) resolution, and the costs, risks,
+  and failure-domain implications of depending on DNS (resolve-by-IP vs
+  by-hostname tradeoffs)
 
 ## 7. Non-goals
 
