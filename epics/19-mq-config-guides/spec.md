@@ -148,9 +148,15 @@ Establish the mold before mass-producing:
    and dashboards; the scrape-side label contract described in prose.
 2. **TCP configuration.** The `TCP` stanza and related channel/listener
    parameters; what each changes and when to touch it.
-3. **Security.** Two halves: (a) TLS/SSL setup and certificate management;
-   (b) baseline security — `CHLAUTH`, `CONNAUTH`, object authorizations
-   (`setmqaut`).
+3. **Security — three guides.** Split by concern, each too large to share one
+   how-to: (a) **TLS & certificate management** — keystores, `CERTLABL`,
+   `SSLCIPH`, cipher choice, and cert-label management (folds in the former
+   standalone PKI backlog item, incl. the open "are we over-using cert labels?"
+   question); (b) **Authentication** — `CHLAUTH` (channel) and `CONNAUTH`
+   (connection) authentication, which fit one guide; (c) **Authorization** —
+   object authorizations via `setmqaut`. Research prerequisite:
+   `logical-minds-foundry/mq-resiliency-lab-for-linux#462` (the "no plaintext
+   anywhere" North Star).
 
 > JSON diagnostic logging is **not** a separate flagship task — it is delivered
 > by Task 0 as the template's worked example. It pairs with Task 1's collectors
@@ -166,13 +172,19 @@ Seed as tasks so the epic has visible runway:
 - mqweb / REST API configuration & hardening
 - Client connection configuration (CCDT, auto-reconnect, safe SCO/plaintext)
 - Log-shipping pipeline (MQ JSON → journal/syslog → SIEM), generic
-- Certificate / PKI & cert-label management (addresses the open "are we
-  over-using cert labels" question)
 - MQ ↔ DNS interaction & dependencies — which addresses must be resolvable
   (forward and reverse), DNS's role in `CONNAME` / cluster-receiver CONNAMEs /
   `CHLAUTH`-by-hostname / HA-VIP / client (CCDT) resolution, and the costs, risks,
   and failure-domain implications of depending on DNS (resolve-by-IP vs
   by-hostname tradeoffs)
+- Recovery logging configuration — linear vs circular logs, log sizing
+  (`LogPrimaryFiles` / `LogFilePages`), media images and backup. Transactional /
+  recovery logging (distinct from JSON *diagnostic* logging); core to resiliency.
+- Channel configuration & tuning — `SHARECNV`, `HBINT` / `KAINT`, `BATCHSZ`,
+  `MAXMSGL`, and channel types: the MQ-level channel knobs the TCP guide does not
+  cover.
+- Distributed queuing / connectivity — sender/receiver channels, remote and
+  transmission queues, `CONNAME`; how queue managers interconnect.
 
 ## 7. Non-goals
 
