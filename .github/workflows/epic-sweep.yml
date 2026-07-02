@@ -1,0 +1,24 @@
+name: Epic Sweep
+
+# Scheduled reconciliation sweep (epic vergil-project/.github#80). Once a day,
+# hand off to the reusable ops-epic-sweep workflow, which runs
+# `vrg-epic-audit --close` to close any epic/task that missed its event-driven
+# close (Action down, broken secret, race). Thin caller per repo convention
+# (cf. epic-rollup.yml / ops.yml); runs once per org over this org's epics.
+
+on:
+  schedule:
+    - cron: '14 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  epic-sweep:
+    uses: vergil-project/vergil-actions/.github/workflows/ops-epic-sweep.yml@v2.1
+    permissions:
+      contents: read
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
