@@ -39,8 +39,8 @@ Turn on every instrumentation-event class on the QMs, declaratively, in the same
 
 - [ ] **Step 1: Confirm the class/attribute list against IBM Docs 9.4**
 
-Run: `python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/en/ibm-mq/9.4.x?topic=qmgr-alter-qmgr"` and read `content.txt`.
-Confirm the exact spelling/values of: `AUTHOREV, CHLEV, CONFIGEV, INHIBTEV, LOCALEV, REMOTEEV, LOGGEREV, PERFMEV, STRSTPEV, COMMEV` (all `ENABLED`) and `CMDEV(NODISPLAY)`; and that per-queue `QDPMAXEV`/`QDPHIEV` are `ALTER QLOCAL` attributes.
+Run: `python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/en/ibm-mq/9.4.x?topic=reference-alter-qmgr-alter-queue-manager-settings"` and read `content.txt`.
+Confirm the exact spelling/values of the Multiplatforms event classes: `AUTHOREV, CHADEV, CHLEV, CONFIGEV, INHIBTEV, LOCALEV, LOGGEREV, PERFMEV, REMOTEEV, SSLEV, STRSTPEV` (all `ENABLED`) and `CMDEV(NODISPLAY)`; that `BRIDGEEV` is **z/OS-only** (footnote 2) and must be excluded; that there is **no `COMMEV`** attribute; and that per-queue `QDPMAXEV`/`QDPHIEV` are `ALTER` queue attributes.
 
 - [ ] **Step 2: Add the event-gate MQSC task**
 
@@ -53,7 +53,7 @@ In `ansible/roles/mq-qmgr/tasks/main.yml`, append after line 76:
 - name: enable instrumentation events (#31)
   ansible.builtin.shell: |
     set -o pipefail
-    printf "ALTER QMGR AUTHOREV(ENABLED) CHLEV(ENABLED) CONFIGEV(ENABLED) INHIBTEV(ENABLED) LOCALEV(ENABLED) REMOTEEV(ENABLED) LOGGEREV(ENABLED) PERFMEV(ENABLED) STRSTPEV(ENABLED) COMMEV(ENABLED) CMDEV(NODISPLAY)\n" \
+    printf "ALTER QMGR AUTHOREV(ENABLED) CHADEV(ENABLED) CHLEV(ENABLED) CONFIGEV(ENABLED) INHIBTEV(ENABLED) LOCALEV(ENABLED) LOGGEREV(ENABLED) PERFMEV(ENABLED) REMOTEEV(ENABLED) SSLEV(ENABLED) STRSTPEV(ENABLED) CMDEV(NODISPLAY)\n" \
       | /opt/mqm/bin/runmqsc {{ qmgr_name }}
   args:
     executable: /bin/bash
