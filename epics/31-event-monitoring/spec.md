@@ -122,6 +122,7 @@ generate high event rates).
 | QMGR attribute | Class | Notes |
 |---|---|---|
 | `AUTHOREV(ENABLED)`  | Authority | Authorization failures — clean security demo |
+| `CHADEV(ENABLED)`    | Channel auto-def | Auto-definition of receiver/server-connection channels |
 | `CHLEV(ENABLED)`     | Channel | Start/stop/error — highest value during failover/reconnect drills |
 | `STRSTPEV(ENABLED)`  | Start/stop | QM start/stop — narrates HA/DR cutovers |
 | `LOGGEREV(ENABLED)`  | Logger | Recovery-log events — ties to the storage/replication story |
@@ -131,7 +132,13 @@ generate high event rates).
 | `INHIBTEV(ENABLED)`  | Inhibit | Get/put inhibited |
 | `LOCALEV(ENABLED)`   | Local | e.g. unknown object / alias-base-queue errors |
 | `REMOTEEV(ENABLED)`  | Remote | Remote-queue resolution errors |
-| `COMMEV(...)`        | Comms | Where applicable to the arm |
+| `SSLEV(ENABLED)`     | TLS | Certificate / TLS-handshake events |
+
+> **Platform note (confirmed against IBM Docs 9.4, ALTER QMGR reference).** The set
+> above is the complete Multiplatforms event-class list. `BRIDGEEV` (IMS-bridge
+> events) is **z/OS-only** (footnote 2, "Valid only on z/OS") and is deliberately
+> excluded — issuing it on a Linux QM would make `runmqsc` reject the whole `ALTER`.
+> There is **no `COMMEV`** attribute; earlier drafts listed one in error.
 
 **Performance events** additionally require **per-queue** thresholds to fire:
 set `QDPMAXEV(ENABLED)` / `QDPHIEV(ENABLED)` (and, where wanted, `QDPLOEV`,
