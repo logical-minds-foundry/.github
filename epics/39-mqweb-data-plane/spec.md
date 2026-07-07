@@ -98,8 +98,9 @@ Established from the code (see §1 citations and below):
 
 ## 4. The correction
 
-Ratify §8.3 and align reality to it via three corrections, plus one explicit
-binding decision.
+Ratify §8.3 and align reality to it via four corrections (classify, address,
+Native HA coverage, and the `rdqm-rhel` site-B VIP the address invariant surfaces),
+plus one explicit binding decision.
 
 ### 4.1 Classify mqweb as data-plane infrastructure
 
@@ -107,32 +108,42 @@ Enter the mqweb `9443` endpoint into `docs/reference/dns-fqdn-inventory.md` as a
 **data-plane infrastructure** surface, closing the "unclassified → defaulted to
 Watcher" gap:
 
-- pcmk / RDQM stacks → the QM's **data-plane VIP** (eligible for the VIP's
-  generated DNS name, e.g. `pcmk-vip.client.com`, which the #21 DNS work already
-  emits).
-- Native HA stacks → the **active instance's data-plane node IP** (the per-node
-  list; no VIP exists).
+- pcmk / RDQM stacks → the QM's **data-plane VIP on each site** (eligible for the
+  VIP's generated per-site DNS names, e.g. `pcmk-vip-a.client.com` /
+  `pcmk-vip-b.client.com`, which the #21 DNS work already emits).
+- Native HA stacks → the **active instance's data-plane node IP** per site (the
+  per-node candidate list; no VIP exists).
 
 State the plane explicitly in `docs/specs/2026-06-03-mq-cluster-lab-design.md`
 §8.3 (and the §1 scope note) so the classification is unambiguous going forward.
 
 ### 4.2 Establish the canonical published REST address
 
-Define, for each QM, the **canonical published mqweb endpoint** — the one
-authoritative address anything connecting to that QM's REST/Console uses — derived
-from `lab/topology.yaml`:
+Define, for each QM, the **canonical published mqweb endpoint(s)** — the
+authoritative address(es) anything connecting to that QM's REST/Console uses —
+derived from `lab/topology.yaml`, **for both sites** (the endpoint must be known on
+whichever site is live after a DR cutover):
 
-- pcmk / RDQM → the QM's **data-plane VIP** `:9443`.
+- pcmk / RDQM → the QM's **data-plane VIP** `:9443` on **each site**: site A `vip`,
+  site B `vip_b`.
 - Native HA → the **active instance's** `<node-IP>:9443`, discovered at runtime by
   the existing *"find the active Native HA instance"* step already used to place
-  MQSC on the live instance (`ansible/site-nativeha-ubuntu.yml:26`). (Topology yields
-  the candidate node list; the active member is a *runtime* resolution, not a static
-  literal.)
+  MQSC on the live instance (`ansible/site-nativeha-ubuntu.yml:26`) — for **each
+  site's** instance group (site A `cluster_group`, site B the peer `*_b` group).
+  (Topology yields the candidate node list; the active member is a *runtime*
+  resolution, not a static literal.)
 - `svc-sim` → **special case:** it models the *counterparty*, lives on `net-ext`
   (`10.60.0.50`, the inter-business WAN) with no app-data-plane presence, and in a
   real estate we would not administer its mqweb at all. Its mqweb is administered
   (lab-only) over its `net-ext` address and is explicitly **outside** the "our data
   plane" framing.
+
+**Fail-loud DR invariant.** A non-Native-HA (VIP-based) stack that publishes a
+site-A VIP **must** publish a site-B VIP (`vip_b`) — a DR/HA stack has a live
+service address on *each* site. The endpoint renderer enforces this: a VIP stack
+missing `vip_b` is a misconfiguration and raises (it does not silently emit a
+one-sided result). This is the seed of the automated HA/DR validation tracked under
+epic #38.
 
 **Who consumes this address.** Not current provisioning — content-apply is Ansible
 `runmqsc` (§3). The canonical endpoint serves: human admins (Console / ad-hoc REST),
@@ -158,6 +169,25 @@ instance's mqweb** — reached via the active-instance resolution step (§4.2). 
 not claim symmetric admin across all instances. This closes the §1 gap (REST
 *available* on every QM). No VIP and no new discovery machinery are introduced.
 
+### 4.4 Fix the `rdqm-rhel` site-B VIP (discovered by the DR invariant)
+
+Applying the §4.2 invariant surfaces a real defect: `rdqm-rhel` declares
+`vip: 10.10.1.100` but **no `vip_b`** in `lab/topology.yaml`, while `pcmk-ubuntu`
+correctly declares both (`vip: 10.10.1.200`, `vip_b: 10.10.2.200`). The site-B VIP
+is **not actually absent** — it is a **hardcoded literal** `TO_VIP=10.10.2.100` in
+`lab/scripts/rdqm-dr-cutover.sh:26` (bound at cutover via `rdqmint`; the mechanism is
+proven in the Phase-C drill, ~69 s cutover at RPO 0). The defect is that the value
+was never declared in topology, so the topology-driven view can't see it — a textbook
+case of the legacy, scattered addressing literals this epic is correcting.
+
+Fix: **declare `vip_b: 10.10.2.100` on the `rdqm-rhel` stack** in `lab/topology.yaml`
+(making topology the single source of truth), and **reconcile
+`rdqm-dr-cutover.sh`** so the site-A/site-B VIPs trace to that declared value rather
+than a bash literal (de-hardcode, or at minimum a guard that the script's literals
+match topology). After this, the renderer emits both sites for `rdqm-rhel` and the
+invariant passes. The RDQM DR floating-IP *mechanism* is unchanged — this is a
+declaration + de-duplication fix, not new DR infrastructure.
+
 ## 5. Binding decision (explicit)
 
 `httpHost=*` **stays.** mqweb is a stateless pass-through; leaving it listening on
@@ -170,8 +200,16 @@ is acceptable for this epic.
 
 ## 6. Scope & non-goals
 
-**In scope — every stack:** pcmk-ubuntu, pcmk-rhel (A+B), RDQM (A+B), Native HA
-(rhel + ubuntu, A+B), svc-sim.
+**In scope — every registered stack** (`lab/topology.yaml` `stacks:`): `pcmk-ubuntu`
+(pacemaker-san, VIP + DR VIP), `rdqm-rhel` (RDQM, single VIP), `nativeha-rhel`,
+`nativeha-ubuntu`, plus `svc-sim` (counterparty special case). **`pcmk-rhel` is
+substrate-only today** (a phase-1 SAN substrate play, not yet a registered QM stack);
+it is intentionally out of scope until it graduates — at which point the
+**topology-driven** endpoint renderer (§4.2) and the per-node mqweb pattern cover it
+**automatically, with no code change**. That is the payoff of deriving from topology
+rather than enumerating stacks by hand — and a small antidote to the legacy,
+hand-scattered naming (`10.30.0.10`, `QMAIN`/`QMSVC`) that caused the original
+misclassification.
 
 **Non-goals (explicit):**
 
@@ -194,12 +232,17 @@ is acceptable for this epic.
 Per stack:
 
 - The canonical published endpoint is reachable and authenticates on the expected
-  address (VIP for pcmk/RDQM; active-instance node IP for Native HA; `net-ext` for
-  svc-sim) — verified by a direct probe (e.g. `openssl s_client` / a REST GET), with
-  no reliance on a hand-passed or legacy literal.
+  address for the **live** site (VIP for pcmk/RDQM; active-instance node IP for
+  Native HA; `net-ext` for svc-sim) — verified by a direct probe (e.g. `openssl
+  s_client` / a REST GET), with no reliance on a hand-passed or legacy literal.
+- The renderer emits **both site-A and site-B** endpoints per stack, and the
+  **fail-loud DR invariant** rejects a VIP stack that lacks `vip_b` (proven by a unit
+  test). `rdqm-rhel` now declares `vip_b` and passes.
 - **Survives failover:** pcmk/RDQM — the VIP moves to the new owner and the endpoint
-  follows; Native HA — a switchover moves the active instance and the resolution step
-  re-points to the new active member's mqweb.
+  follows; **cross-site DR cutover** — the site-B VIP the renderer publishes matches
+  the address `rdqm-dr-cutover.sh` binds, and REST answers there post-cutover;
+  Native HA — a switchover moves the active instance and the resolution step re-points
+  to the new active member's mqweb.
 - mqweb is **present and running on every** Native HA instance; the active instance's
   mqweb serves admin (no claim of symmetric admin across replicas).
 - mqweb is classified as data-plane infrastructure (svc-sim as the counterparty
@@ -226,13 +269,17 @@ Implementation tasks (land in `mq-resiliency-lab-for-linux`, linked under `#39`)
 
 1. **Classify + document** mqweb's plane — FQDN inventory entry (svc-sim as the
    counterparty special case) + design §8.3/§1 statement.
-2. **Establish the canonical published REST address** — topology-derived value +
-   authoritative FQDN-inventory record; honestly update/retire the legacy
-   `apply.py`/`content/`/runbook rather than re-aiming them as the live path.
+2. **Establish the canonical published REST address** — topology-derived value for
+   **both sites** + the fail-loud DR invariant + authoritative FQDN-inventory record;
+   honestly update/retire the legacy `apply.py`/`content/`/runbook rather than
+   re-aiming them as the live path.
 3. **Native HA mqweb coverage** — `mqweb` role onto every instance (both arms, both
    sites) as the always-on per-node service; wire active-instance resolution so the
    published endpoint reaches the active member's mqweb.
 4. **Cross-stack verification + failover proof** (+ cold-rebuild acceptance).
+5. **Fix the `rdqm-rhel` site-B VIP** — declare `vip_b: 10.10.2.100` in topology,
+   reconcile `rdqm-dr-cutover.sh` to the declared value, confirm the renderer emits
+   both sites and the invariant passes (§4.4).
 
 Bookend tasks (in `.github`, already created):
 
