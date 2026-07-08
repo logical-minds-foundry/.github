@@ -72,6 +72,13 @@ is what the lab is *for* — to **prove the claims empirically** against a live
   approach. The team leans **do-it-yourself / anti-vendor**, prefers state "on
   the inside," and does **not** fully trust MQ — so an MQ-leaning design starts
   suspect and must earn its place on merit and honesty.
+- **Independent parasite of the lab.** This experiment is a **self-contained
+  repo**. "Use the lab" means **use the running queue-manager infrastructure**,
+  never the lab's tooling — `mqlab` and the HA/DR `validate` framework stay the
+  lab's. The experiment adds **only its own** queues to the existing queue
+  manager via reproducible Ansible, touches nothing the lab owns, and ships its
+  own small CLI and responder app. The lab need not know it exists (see §12/§13;
+  consistent with the repo's OSS component-boundary principle).
 - **MQ-native and minimalist.** Research and design stay **inside the MQ
   product**: creative, minimal, product-supported mechanisms. No new vendor
   dependencies, no bolt-on products, no "magic" channel exits unless proven
@@ -199,19 +206,42 @@ acceptable) but fixes the algorithm so I1/I2 hold — using nothing but MQ.
   header comparison of the outbound and inbound archive queues: browse both, and
   the outbound entries with no matching inbound entry **are** the unconfirmed
   replay set. Deterministic, transactional, and runnable **at any moment**, not
-  just end-of-day.
+  just end-of-day. *If `CorrelId`≠`MsgId`, reconciliation falls back to parsing
+  the application body — which costs the header-only cheapness of one dashboard
+  calculation, not correctness; and since the observability view must show
+  **which** messages are unconfirmed (not just how many), it reads the body
+  anyway. So this is a **cost** caveat, not a showstopper.*
 - **The inbound *delivery-to-app* handoff is the genuinely hard part** — and it
   is independent of archiving. Forwarding the message body to the app over TCP is
   a **non-transactional side effect**: commit-then-crash-before-forward loses it
   to the app; forward-then-crash-before-commit redelivers it (duplicate to the
   app). Whether the gateway even *owns* guaranteed delivery to the app, or only
   the archive, is an open question (§11). This is what was hand-waved in the room.
-- **Durable state lives in MQ; the gateway trends toward stateless.** With
-  archiving in MQ queues, "recover-fast" becomes trivial — there is little on the
-  gateway host to recover, because the authoritative state is in MQ, which is
-  *already* HA/DR in this architecture. This is the crux move, and it is
-  **defense-in-depth alongside** their internal log, cheap to add — not a
-  replacement.
+- **Where state and durability actually live (correcting an easy overreach).**
+  The gateway runs *outside* the queue manager, so it keeps its **own** state —
+  notably the outgoing replay requirement (R3/R4) and the "did I put that message
+  before I crashed?" question. This MQ-native design does **not** make the
+  gateway stateless, and claiming so would be wrong. What it provides is a
+  **near-free second layer of defense** — the "two levels" the team wants, driven
+  by their real fear: *what if the queue manager goes away and we don't know?*
+  Two clarifications matter:
+  - **Atomicity is not durability.** The two-queue syncpoint put gives
+    *atomicity* (both puts commit or neither), but both queues live on the
+    **same** queue manager — so the archive's durability across a *queue-manager*
+    loss is only as good as **that queue manager's** HA/DR. **I1 holds for this
+    design iff the archive's queue manager is HA/DR.** In this architecture it is
+    (3+3), so the archive inherits seconds-RTO, zero-loss durability for free —
+    which is exactly why leaning on the queue manager beats shipping logs to
+    **non-HA** alternate hosts: your archive is only as resilient as the tier it
+    sits on, so put it on the resilient one you already run. On a single, non-HA
+    queue manager this design would be *worse* than theirs (one copy vs. three).
+  - **It reduces, it does not obviate.** Because the gateway keeps its own replay
+    state regardless, this layer lets the team *rethink how much replay
+    complexity to build into the gateway* — but gateway-level replay stays a
+    requirement. Complementary, not a substitute. The cost is small and concrete:
+    a simple change to the gateway's MQ API semantics (the atomic two-queue put)
+    plus start-of-day / end-of-day archive clearing (standard batch; the app can
+    do it dynamically).
 
 **The known tension, named honestly.** "Using a queue as a database" is normally
 an anti-pattern. At **this** volume, latency tolerance, and an **intraday**
@@ -246,7 +276,9 @@ Scope is deliberately confined to **mechanisms inside the MQ product**:
 - **Two-queue syncpoint put** (the outbound atomic dual-write, §6).
 - **Streaming queues** — the queue manager puts a near-identical copy of every
   message onto a secondary queue; `STRMQOS(MUSTDUP)` makes the copy part of the
-  unit of work (no copy → the put fails). The zero-app-code path to an archive.
+  unit of work (no copy → the put fails). The zero-app-code path to an archive. *(Verify before building: whether a
+  streaming-queue copy can be taken off a **transmission** queue — flag it like
+  the correlation-key assumption; do not build on it unpromised.)*
 - **COA / COD report messages** — confirmation-on-arrival / on-delivery, as an
   MQ-level (not business-level) confirmation signal; understand where they help
   and where they do not (they prove MQ delivery, not counterparty processing).
@@ -286,8 +318,10 @@ retention-compliance** requirements a pure transit component could sidestep. We
 name this against **both** designs, not just theirs. The honest upside of the
 MQ-managed option: the data-at-rest answer is then a **known, product-supported**
 one (queue-file/disk encryption of the queue manager's storage, TLS already
-covering in-transit, message-level encryption-at-rest available natively if ever
-required) rather than a bespoke scheme bolted onto hand-rolled log files. Options
+covering in-transit, message-level encryption-at-rest via Advanced Message
+Security if ever required — an interceptor-based capability, not free, but a
+known product feature rather than a bespoke scheme bolted onto hand-rolled log
+files. Options
 are presented factually, inside the MQ-native boundary — no over-proposing.
 
 ## 11. Open questions for the application team (the deliverable's payload)
@@ -312,7 +346,7 @@ are presented factually, inside the MQ-native boundary — no over-proposing.
 **Correctness-critical:**
 7. **Confirmation semantics** — is the reply's `CorrelId` the original request's
    `MsgId`? What exactly counts as a confirmation (business response vs. MQ
-   COA/COD)? *Reconciliation hinges entirely on the correlation key.*
+   COA/COD)? *This sets the **cost** of reconciliation (header-only vs. body-parse), not its feasibility — see §6.*
 8. **Replication mechanism** — how, exactly, are the writes to the alternate log
    hosts done? (Never specified; the hidden complexity.)
 
@@ -329,36 +363,56 @@ are presented factually, inside the MQ-native boundary — no over-proposing.
 
 ## 12. Lab demonstration / proof plan
 
-The empirical half of the epic, run against a live **3+3** HA/DR topology in the
-existing lab:
+The empirical half of the epic. It is delivered by an **independent repo** that
+**bolts onto the queue-manager infrastructure the lab already runs** — it does
+not reuse the lab's tooling (see §2, the parasite model), and it is
+**arm-agnostic**: it attaches to whichever running queue manager and counterparty
+the lab exposes.
 
-- Implement **Rung 0** (their design) and the **MQ-native option** (Rung 1) with
-  dummy trades and a correlation key mapped into the message body, reusing the
-  existing end-to-end test path / counterparty simulator.
-- **Induce the failure scenarios** of §5 — especially **host loss with an
-  un-shipped log entry** — and *quantify the loss*: show Rung 0 silently dropping
-  the very message it cannot replay, and the MQ-native option holding.
-- **Visualize** sent-vs-confirmed and the unconfirmed set live (the §9 view),
-  and demonstrate reconciliation-by-browse against the archives with no impact on
-  the live path.
+- **Setup (reproducible Ansible, parasite-style):** add the experiment's **own**
+  round-trip queues (new names) to the existing queue manager and counterparty
+  app. Nothing the lab owns is modified. Tear the lab down and the setup is lost
+  — re-applied from Ansible; that trade-off is accepted.
+- **Its own small CLI** drives the demo: **start-of-day** (clear the archive
+  queues) → **run the simulation in batches** → **end-of-day** (clear the queues,
+  shown live clearing on the dashboard). This is *not* `mqlab` and *not* the
+  HA/DR `validate` framework — both stay the lab's.
+- **A small responder / dummy app** plays the client, consuming replies — and can
+  **deliberately drop replies** at a controlled rate (e.g. toward end of day) to
+  inject **missing confirmations**, manufacturing exactly the condition the
+  observability view exists to surface.
+- **What the demo shows:** batches flowing; the responder's drop-rate opening a
+  visible gap; the §9 dashboard surfacing the growing **unconfirmed set**
+  (sent-vs-confirmed) live; reconciliation-by-browse run against the **archives**
+  with zero impact on the live path; and the SOD/EOD clearing demonstrated on the
+  board. The "quantification" is the **visible gap**, produced by a known
+  drop-rate — a live demonstration, not a pass/fail assertion.
+- **Optional deeper arm (stretch):** stand up a minimal Rung-0-style async-log
+  gateway to reproduce the **host-loss silent-loss** scenario directly and
+  contrast it with the MQ-native option holding. The primary demonstration is the
+  MQ-native archive + observability story above; this is additive if pursued.
 
 ## 13. Scope, phasing & the parallel scaffolding track
 
 1. **Phase 1 (this task, #50):** the design-study spec + its plan. Payload = the
    §11 questions for the app team.
-2. **Scaffolding (parallel, design-independent — start now):** stand up a **new
-   repo** for the gateway demonstration; wire its **cross-VM dependency** so its
-   sessions run inside the **existing lab VM** (a manual dependency: the lab must
-   be up, which it usually is); stub the **interface to a live 3+3**. This does
-   not gate on the design being nailed and can proceed while the design iterates.
+2. **Scaffolding (parallel, design-independent — start now):** stand up the
+   **new, independent repo** for the gateway experiment. Its cloud sessions run
+   inside the existing lab VM via the repo's **cross-VM dependency** — a proven,
+   trivial configuration feature (already wired for other repos), not a risk;
+   standing it up is just applying that config. The repo's setup Ansible adds
+   **its own** round-trip queues to the running queue manager and counterparty
+   (§12); it ships its **own** small CLI and responder app; it reuses **none** of
+   the lab's tooling. This does not gate on the design being nailed.
 3. **Lab demonstration:** §12.
-4. **Iterate** the design ladder with app-team feedback; expect their answers to
-   §11 to reshape the options, which is the point — this is a conversation, not a
-   one-shot verdict.
+4. **Iterate** the design ladder with app-team feedback; expect their §11 answers
+   to reshape the options — this is a conversation, not a one-shot verdict.
 
-Out of scope for Phase 1: choosing a final rung (that is the app team's call,
-informed by the demonstration); the cross-VM tooling *mechanism* details
-(settled during scaffolding).
+Out of scope for Phase 1: choosing a final rung (the app team's call, informed by
+the demonstration). **Verify-before-build items** to resolve early (neither
+blocks, but do not build on either unpromised): the `CorrelId`=`MsgId`
+correlation assumption (§6/§11), and whether a streaming-queue copy can be taken
+off a transmission queue (§8).
 
 ## 14. Success criteria
 
