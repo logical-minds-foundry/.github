@@ -299,16 +299,32 @@ Scope is deliberately confined to **mechanisms inside the MQ product**:
 ## 9. The observability differentiator
 
 This is expected to be the argument that **sells** the MQ-native option, and it
-is the lab's home turf. Because reconciliation and monitoring run against the
-**archive** copies and **never** the live queues, the live payload path is
-untouched — no browse contention, no in-flight message locking on the hot path.
-Browsing the archives every few minutes yields an **authoritative, MQ-level view
-of sent-vs-confirmed across the day**, with the unconfirmed set surfaced
-continuously. That directly answers the team's own open question — *what
-observability is needed to detect/resolve in-flight messages during recovery?* —
-with a running artifact rather than a paragraph, and it showcases the lab's
-Grafana tier. A mockup of this daily "sent vs. confirmed / unconfirmed set" view
-is a Phase-1 deliverable.
+is the lab's home turf. Crucially, it is **not a new dashboard** — it is an
+**extension of the messaging-flow board the lab already runs**: the
+queue-manager health and live-flow panels stay as the base layer, and the
+archive-queue reconciliation panels are a new special-case layer on top. That
+framing matters for the pitch (augment, don't replace) and it is honest — we
+build on the working board, we don't ask anyone to adopt a parallel one.
+
+Because reconciliation and monitoring run against the **archive** copies and
+**never** the live queues, the live payload path is untouched — no browse
+contention, no in-flight message locking on the hot path. Browsing the archives
+every few minutes yields an **authoritative, MQ-level view of sent-vs-confirmed
+across the day**, with the unconfirmed set surfaced continuously — and, because
+the observer needs to see **which** messages are unconfirmed (not just how many),
+the unconfirmed-set detail is a first-class panel. That directly answers the
+team's own open question — *what observability is needed to detect/resolve
+in-flight messages during recovery?* — with a running artifact rather than a
+paragraph.
+
+**Phase-1 mockup (built):** an illustrative, anonymized mockup of this extension
+— a business-day ribbon, the base-layer queue-manager health, KPI tiles, the
+hero *unconfirmed-backlog-over-the-day* chart (with the reply-drop event
+annotated), a *send-vs-confirm rate* companion, and the *unconfirmed-set* table —
+is published at
+`https://claude.ai/code/artifact/e2a3f94e-100a-48c1-ada0-6fd2620acf50`
+(illustrative data only; shape, not real volumes). The build version will be a
+panel set added to the existing board, not a standalone page.
 
 ## 10. Security & data classification
 
