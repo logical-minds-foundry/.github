@@ -197,9 +197,10 @@ acceptable) but fixes the algorithm so I1/I2 hold — using nothing but MQ.
   then commits. The inbound archive thereby becomes the authoritative
   **"processed" ledger**: anything in it was definitively taken off the reply
   queue and processed; anything still on the live reply queue has not been.
-  (A **channel exit** would only be needed for *transparent* cloning without the
-  app doing the copy — and MQ's native **streaming queues** already provide that
-  transparent copy if hand-coding is undesirable; see §8.)
+  We deliberately do the copy with an **explicit app-level put** — glass-box and
+  trivial (a second put under syncpoint). A channel exit, or MQ's native
+  streaming queues, could clone transparently instead, but **neither is needed**
+  and both are more machinery than the two-put; see §8.
 - **Reconciliation — browse the archives, match on correlation.** Assuming the
   reply's `CorrelId` is the original request's `MsgId` (standard MQ request-reply
   correlation — **flagged for verification**, §11), reconciliation is a
@@ -274,11 +275,12 @@ log-shipping tier.*
 Scope is deliberately confined to **mechanisms inside the MQ product**:
 
 - **Two-queue syncpoint put** (the outbound atomic dual-write, §6).
-- **Streaming queues** — the queue manager puts a near-identical copy of every
-  message onto a secondary queue; `STRMQOS(MUSTDUP)` makes the copy part of the
-  unit of work (no copy → the put fails). The zero-app-code path to an archive. *(Verify before building: whether a
-  streaming-queue copy can be taken off a **transmission** queue — flag it like
-  the correlation-key assumption; do not build on it unpromised.)*
+- **Streaming queues** *(noted, deliberately not used)* — the queue manager can
+  put a near-identical copy of every message onto a secondary queue
+  (`STRMQOS(MUSTDUP)` makes the copy part of the unit of work). It is the
+  zero-app-code alternative to the two-put, but we **don't need it**: the explicit
+  two-put is simpler, glass-box, and trivial. (If anyone does pursue it, verify
+  first whether a copy can be taken off a **transmission** queue.)
 - **COA / COD report messages** — confirmation-on-arrival / on-delivery, as an
   MQ-level (not business-level) confirmation signal; understand where they help
   and where they do not (they prove MQ delivery, not counterparty processing).
@@ -316,13 +318,15 @@ replicated logs on the alternate hosts (their design) — those messages become
 **data at rest**, which likely pulls in **on-disk encryption and
 retention-compliance** requirements a pure transit component could sidestep. We
 name this against **both** designs, not just theirs. The honest upside of the
-MQ-managed option: the data-at-rest answer is then a **known, product-supported**
-one (queue-file/disk encryption of the queue manager's storage, TLS already
-covering in-transit, message-level encryption-at-rest via Advanced Message
-Security if ever required — an interceptor-based capability, not free, but a
-known product feature rather than a bespoke scheme bolted onto hand-rolled log
-files. Options
-are presented factually, inside the MQ-native boundary — no over-proposing.
+MQ-managed option: the data-at-rest answer is then a **storage-layer** one —
+disk / queue-file encryption of the queue manager's storage, with TLS already
+covering data in transit — a known, product-supported answer rather than a
+bespoke scheme bolted onto hand-rolled log files. **Explicitly out of scope:**
+message-level encryption (e.g. Advanced Message Security). It is a separate
+licensed, advanced feature — overkill here, and exactly the kind of complexity
+this design stays away from; data-at-rest is handled at the storage layer, not
+the message layer. Options are presented factually, inside the MQ-native
+boundary — no over-proposing.
 
 ## 11. Open questions for the application team (the deliverable's payload)
 
@@ -409,10 +413,11 @@ the lab exposes.
    to reshape the options — this is a conversation, not a one-shot verdict.
 
 Out of scope for Phase 1: choosing a final rung (the app team's call, informed by
-the demonstration). **Verify-before-build items** to resolve early (neither
-blocks, but do not build on either unpromised): the `CorrelId`=`MsgId`
-correlation assumption (§6/§11), and whether a streaming-queue copy can be taken
-off a transmission queue (§8).
+the demonstration). **Verify-before-build item** to resolve early (does not
+block, but do not build on it unpromised): the `CorrelId`=`MsgId` correlation
+assumption (§6/§11) — and even then it is a cost caveat, not a correctness one.
+(Streaming queues are deliberately not used, §8, so their transmission-queue
+caveat is moot unless someone revisits that choice.)
 
 ## 14. Success criteria
 
