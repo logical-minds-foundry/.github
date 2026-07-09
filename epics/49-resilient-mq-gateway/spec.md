@@ -191,6 +191,25 @@ acceptable) but fixes the algorithm so I1/I2 hold — using nothing but MQ.
     channel*; gone from it = *transmitted to the counterparty queue manager*; a
     matching inbound confirmation = *processed end-to-end*. Only the third is
     proof of processing; the design keeps all three visible.
+  - **MsgId preservation is the subtle part (and a verify-before-build item).**
+    Reconciliation needs the archived copy to carry the **same MsgId** as the
+    message the counterparty sees — because the counterparty echoes that MsgId
+    back as the reply's `CorrelId`, and that is the key we reconcile on. Two clean
+    ways to guarantee it, **both inside one unit of work**: **(a)** the gateway
+    **assigns the MsgId itself** (MQ lets the app supply `MQMD.MsgId`; a unique
+    gateway-controlled value, consistent with R9's freedom to choose the key) and
+    sets it on both puts — deterministic, no read-back; or **(b)** put to the
+    transmit queue first with a QM-generated MsgId, read the resolved MsgId back
+    from the MQMD (populated when `MQPUT` returns, **before** commit), and put the
+    copy to the archive with that MsgId — then commit both together.
+  - **The hole to avoid — and it is a real one.** Never split archiving into a
+    *separate* commit (transmit committed, then archive): a crash in between
+    leaves a message **sent but unarchived**, which is exactly the I1 silent-loss
+    third state. Archiving **must** share the send's unit of work. This is also
+    why a queue-manager-abstracted / streaming copy needs a closer look — confirm
+    it preserves the MsgId **and** rides the same UOW before relying on it. The
+    inbound side has no such issue: you GET a fully-formed message (MsgId +
+    CorrelId already populated) and PUT the complete copy in one UOW.
 - **Inbound archive — the same trick, mirrored, still no exit.** The gateway is
   already doing a destructive GET under syncpoint on the reply queue; it adds a
   PUT of a copy to the **inbound-archive queue** in the **same unit of work**,
@@ -275,6 +294,12 @@ log-shipping tier.*
 Scope is deliberately confined to **mechanisms inside the MQ product**:
 
 - **Two-queue syncpoint put** (the outbound atomic dual-write, §6).
+- **Archiving mechanism & MsgId preservation** — the load-bearing detail: how to
+  make the archive copy carry the same MsgId as the transmitted message, **in one
+  unit of work**. Compare app-level (gateway-assigned MsgId, or QM-generated read
+  back before commit) against any queue-manager-side copy — and confirm each both
+  preserves the MsgId and shares the send's UOW (a separate commit opens the I1
+  hole; see §6).
 - **Streaming queues** *(noted, deliberately not used)* — the queue manager can
   put a near-identical copy of every message onto a secondary queue
   (`STRMQOS(MUSTDUP)` makes the copy part of the unit of work). It is the
@@ -305,6 +330,13 @@ queue-manager health and live-flow panels stay as the base layer, and the
 archive-queue reconciliation panels are a new special-case layer on top. That
 framing matters for the pitch (augment, don't replace) and it is honest — we
 build on the working board, we don't ask anyone to adopt a parallel one.
+
+**Granularity: likely one page per counterparty.** Each counterparty has its own
+queues and slightly different semantics, so a page probably scopes to a single
+counterparty rather than trying to fold N counterparties onto one board (whether
+they can be combined is itself an open question, and it depends on the topology
+question 6b in §11). The shared base layer (queue-manager health) can still be
+common; the archive panels are per-counterparty.
 
 Because reconciliation and monitoring run against the **archive** copies and
 **never** the live queues, the live payload path is untouched — no browse
@@ -362,6 +394,12 @@ boundary — no over-proposing.
    trades? *Provisionally FIFO, unconfirmed.* This forks the resilient design:
    FIFO → a single failover-able writer (the FIX-shaped problem); independent →
    active/active becomes viable and much cheaper.
+6b. **Counterparty topology** — a **separate queue manager (and 3+3) per
+    counterparty**, or **counterparties sharing** a queue manager / HA group?
+    (Not yet asked. Each counterparty has its own queues and slightly different
+    semantics, so this drives instance count, isolation, and blast radius. We
+    focus on one counterparty first, so it is academic for now — but it is a real
+    question.)
 
 **Correctness-critical:**
 7. **Confirmation semantics** — is the reply's `CorrelId` the original request's
@@ -429,11 +467,17 @@ the lab exposes.
    to reshape the options — this is a conversation, not a one-shot verdict.
 
 Out of scope for Phase 1: choosing a final rung (the app team's call, informed by
-the demonstration). **Verify-before-build item** to resolve early (does not
-block, but do not build on it unpromised): the `CorrelId`=`MsgId` correlation
-assumption (§6/§11) — and even then it is a cost caveat, not a correctness one.
-(Streaming queues are deliberately not used, §8, so their transmission-queue
-caveat is moot unless someone revisits that choice.)
+the demonstration). **Verify-before-build items** to resolve early (they do not
+block the design, but do not build on them unpromised):
+- **MsgId preservation in one UOW** (§6/§8) — the load-bearing one: the archive
+  copy must carry the transmitted message's MsgId within a single unit of work.
+  Confirm the app-level approach (gateway-assigned MsgId, or QM-generated read
+  back before commit) and reject any two-commit variant. This is a *correctness*
+  item — the I1 hole lives here.
+- **`CorrelId`=`MsgId`** on the reply (§6/§11) — a *cost* caveat (header-only vs.
+  body-parse reconciliation), not a correctness one.
+- (Streaming queues are deliberately not used, §8, so their transmission-queue
+  caveat is moot unless someone revisits that choice.)
 
 ## 14. Success criteria
 
