@@ -210,7 +210,7 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 
 **Interfaces:**
 - Consumes: the whole Track-C stack.
-- Produces: a repeatable scripted run — SOD clear → batches flowing (`drop_rate=0`, backlog flat) → **inject the reply stall** mid-run → backlog climbs, the unconfirmed set populates, the board shows it live → reconcile lists exactly which messages → (optional) replay resends them → EOD clear.
+- Produces: a repeatable scripted run — SOD clear → batches flowing (`drop_rate=0`, backlog flat) → **inject the reply stall** mid-run → backlog climbs, the unconfirmed set populates, the board shows it live → reconcile lists exactly which messages → **replay (C7) resends them, the counterparty dedups, backlog drains to zero** → EOD clear.
 
 - [ ] **Step 1: Write `scenario.py`** driving the accelerated day and the drop injection at a scripted point.
 - [ ] **Step 2: Run end-to-end on the live 3+3;** capture the board (screenshot to `build/temp/`) at the backlog climb.
@@ -218,6 +218,24 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 - [ ] **Step 4: Commit.**
 
 **Acceptance:** a one-command scripted demo reproduces the reply-stall story on the live lab, with the board telling it.
+
+### Task C7: Replay & idempotent resend (R4 resend half + invariant I2)
+
+The other half of "replay the unconfirmed": resend them, and prove the resend is **delivered once**.
+
+**Files (new repo):**
+- Create: `src/gwlab/replay.py`, `tests/test_replay.py`. Modify: `src/gwlab/responder.py` (dedup on MsgId), `src/gwlab/cli.py` (`replay` subcommand).
+
+**Interfaces:**
+- Consumes: `reconcile.unconfirmed()` (C3), `outbound.send` (C1), `responder` (C2).
+- Produces: `replay.resend(unconfirmed) -> count` — resends each unconfirmed message through the outbound two-put **reusing its original MsgId** (so the resend is identifiable and the counterparty can dedup). `responder` gains a **seen-MsgId set** so a replayed message is **delivered once** (I2), with the dedup horizon = intraday (matching R12).
+
+- [ ] **Step 1: Write the failing test** — given a set of unconfirmed messages, `resend()` re-puts each with its **original MsgId**; and the responder, having already seen that MsgId, does **not** double-process it (assert delivered-once).
+- [ ] **Step 2: Run it, confirm it fails.**
+- [ ] **Step 3: Implement `replay.resend()`** (re-put by original MsgId via `outbound.send`) **and responder dedup** (seen-MsgId set, persisted so a responder restart doesn't reprocess; horizon = intraday).
+- [ ] **Step 4: Run tests green;** on the live QM, run a drop-injected day → replay → confirm backlog drains to zero and **no message is processed twice**. Commit.
+
+**Acceptance:** the unconfirmed set is resent by MsgId; the counterparty dedups (I2 demonstrated — delivered once); backlog drains to zero on the board. This is the claim the whole epic exists to prove.
 
 ---
 
@@ -263,13 +281,13 @@ Optional deeper arm (spec §12): stand up a minimal Rung-0-style gateway (local 
 
 - **A1 → A2 → A3** (repo, then queues, then CLI/app skeletons).
 - **A2 → B1, B2** (spikes need the queues + counterparty).
-- **B1 → C1**; **B2 → C3**; **A3 → C1..C5**; **C1, C2 → C3 → C4**; **C1..C5 → C6**.
+- **B1 → C1**; **B2 → C3**; **A3 → C1..C7**; **C1, C2 → C3 → C4**; **C1, C2, C3 → C7**; **C1..C7 → C6**.
 - **D1** independent (research), feeds the app-team doc. **E1** optional, after C6.
 - **Gated on app-team answers (spec §11), not on this plan:** the inbound delivery-to-app handoff (Q1–5), ordering/active-active (Q6), counterparty topology (Q6b), retention/DR/encryption scope. The demo builds the *archive + reconciliation + observability* core, which does not depend on those answers.
 
 ## Self-Review
 
-**Spec coverage:** §5 Rung-0 teardown → E1 (repro) + C6 talking points. §6 two-put/inbound/MsgId → B1, C1, C2. §7 Rung 2 → out of scope for the demo (design discussion only; noted). §8 research → D1. §9 observability extension → C4 (mockup is the reference). §10 data-at-rest → carried as an app-team question (Q11); no build. §11 questions → the deliverable payload (spec), not code; §11 Q7/Q12 verified in B2/D1. §12 proof plan → Track C + E1. §13 scaffolding + verify items → Track A + B. R12 intraday retention → C5.
+**Spec coverage:** §5 Rung-0 teardown → E1 (repro) + C6 talking points. §6 two-put/inbound/MsgId → B1, C1, C2. **R4 replay-the-unconfirmed → C3 (identify) + C7 (resend); I2 idempotent replay → C7 (counterparty dedup, delivered-once).** §7 Rung 2 → out of scope for the demo (design discussion only; noted). §8 research → D1. §9 observability extension → C4 (mockup is the reference). §10 data-at-rest → carried as an app-team question (Q11); no build. §11 questions → the deliverable payload (spec), not code; §11 Q7/Q12 verified in B2/D1. §12 proof plan → Track C + E1. §13 scaffolding + verify items → Track A + B. R12 intraday retention → C5.
 
 **Placeholder scan:** no "TBD/handle appropriately"; where a task's internal mechanism depends on a spike (C1 on B1), the acceptance criteria are stated precisely and the dependency is explicit — a sequencing fact, not a placeholder. Repo name is an explicit A1 decision, not a placeholder.
 
