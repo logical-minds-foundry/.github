@@ -194,13 +194,22 @@ quorum" buys nothing while costing correctness.
 Keeps the team's stance (standalone process, no cluster manager, manual restart
 acceptable) but fixes the algorithm so I1/I2 hold — using nothing but MQ.
 
-- **Outbound — atomic dual-write via two puts in one syncpoint.** The gateway
-  opens the **remote/transmission queue** *and* an **archive queue**, PUTs to
-  both in a single unit of work (`MQPMO_SYNCPOINT`), and commits together. Every
-  message in the archive was atomically written to the transmit path. The
-  invariant falls out for free: **once a message is no longer on the transmission
-  queue, the sender channel has handed it onward.** No bespoke log, no
-  log-shipping, no exit.
+- **Outbound archive — primary: a streaming queue (`STRMQOS(MUSTDUP)`).** The
+  gateway does a **single put**; the queue manager writes an atomic,
+  MsgId-preserving copy to the archive queue (research task `#54`). It is
+  **base-licensed** (not MQ Advanced), needs **zero application code**, and IBM's
+  stated purpose for it is replay. If the copy cannot be written, the original put
+  fails (`MQCC_FAILED`) — the same both-or-neither guarantee as the two-put, but
+  enforced by the queue manager. Because `STREAMQ` cannot be set on a
+  transmission queue, the stream is taken off the **local put queue**. *This is
+  the correct primary — the research made clear that hand-rolling the copy in the
+  app was the hack, and the product does it better and more abstractly.*
+- **Outbound archive — fallback: two puts in one syncpoint.** Where streaming is
+  not available, the gateway PUTs to the transmit queue *and* an archive queue in
+  a single unit of work (`MQPMO_SYNCPOINT`) and commits together — the explicit,
+  glass-box equivalent, fully in the app. The invariant is the same: **once a
+  message is no longer on the transmission queue, the sender channel has handed
+  it onward.**
   - *Three honest levels of "sent":* on the transmission queue = *queued for the
     channel*; gone from it = *transmitted to the counterparty queue manager*; a
     matching inbound confirmation = *processed end-to-end*. Only the third is
@@ -307,19 +316,18 @@ log-shipping tier.*
 
 Scope is deliberately confined to **mechanisms inside the MQ product**:
 
-- **Two-queue syncpoint put** (the outbound atomic dual-write, §6).
-- **Archiving mechanism & MsgId preservation** — the load-bearing detail: how to
-  make the archive copy carry the same MsgId as the transmitted message, **in one
-  unit of work**. Compare app-level (gateway-assigned MsgId, or QM-generated read
-  back before commit) against any queue-manager-side copy — and confirm each both
-  preserves the MsgId and shares the send's UOW (a separate commit opens the I1
-  hole; see §6).
-- **Streaming queues** *(noted, deliberately not used)* — the queue manager can
-  put a near-identical copy of every message onto a secondary queue
-  (`STRMQOS(MUSTDUP)` makes the copy part of the unit of work). It is the
-  zero-app-code alternative to the two-put, but we **don't need it**: the explicit
-  two-put is simpler, glass-box, and trivial. (If anyone does pursue it, verify
-  first whether a copy can be taken off a **transmission** queue.)
+- **Streaming queues (`STRMQOS(MUSTDUP)`) — the primary archive** *(research
+  `#54`)*. The queue manager writes an atomic (`MQCC_FAILED` on copy failure),
+  **MsgId-preserving** copy of every message to a secondary queue, with **zero
+  application code**. It is **base-licensed** (not MQ Advanced — and we use no
+  AMS), and IBM ships it for exactly this: its stated purpose is replay.
+  Constraint: `STREAMQ` cannot be set on a `USAGE(XMITQ)`, so the copy is taken
+  off the **local put queue**, not the transmission queue.
+- **Two-queue syncpoint put** — the glass-box **fallback** archive (§6): the app
+  makes the two puts explicitly in one UOW where streaming is unavailable. Its
+  MsgId-preservation detail (gateway-assigned MsgId, or QM-generated read back
+  before commit, both in one UOW — never a second commit, which opens the I1
+  hole) is retained for that path.
 - **COA / COD report messages** — confirmation-on-arrival / on-delivery, as an
   MQ-level (not business-level) confirmation signal; understand where they help
   and where they do not (they prove MQ delivery, not counterparty processing).
@@ -483,15 +491,18 @@ the lab exposes.
 Out of scope for Phase 1: choosing a final rung (the app team's call, informed by
 the demonstration). **Verify-before-build items** to resolve early (they do not
 block the design, but do not build on them unpromised):
-- **MsgId preservation in one UOW** (§6/§8) — the load-bearing one: the archive
-  copy must carry the transmitted message's MsgId within a single unit of work.
-  Confirm the app-level approach (gateway-assigned MsgId, or QM-generated read
-  back before commit) and reject any two-commit variant. This is a *correctness*
-  item — the I1 hole lives here.
-- **`CorrelId`=`MsgId`** on the reply (§6/§11) — a *cost* caveat (header-only vs.
-  body-parse reconciliation), not a correctness one.
-- (Streaming queues are deliberately not used, §8, so their transmission-queue
-  caveat is moot unless someone revisits that choice.)
+- **Streaming-queue archive on the box** (§6/§8, the **primary** now) — confirm
+  on the live queue manager: `STRMQOS(MUSTDUP)` atomicity (a copy failure fails
+  the original put); the direct queue-to-queue copy retains the MsgId (research
+  `#54` reports it does, and the retained-fields list); and `STREAMQ` on a
+  `USAGE(XMITQ)` is rejected (so we stream off the local put queue).
+- **MsgId preservation in the fallback two-put** (§6) — if streaming is
+  unavailable, the archive copy must carry the same MsgId in **one** unit of work
+  (gateway-assigned, or QM-generated read back before commit); never a second
+  commit (the I1 hole). *Correctness* item for the fallback path.
+- **`CorrelId`=`MsgId`** on the reply (§6/§11) — **resolved** by research `#54`:
+  it is the *documented request/reply default*. Confirm only that the
+  counterparty does not override the report field.
 
 ## 14. Success criteria
 
