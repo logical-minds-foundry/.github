@@ -87,6 +87,20 @@ is what the lab is *for* — to **prove the claims empirically** against a live
   already operated"* footnote — no endorsement.
 - **Glass-box, human-operable.** Prefer mechanisms an operator can see and reason
   about (explicit app-level puts, browsable archive queues) over opaque ones.
+- **The design lives in the MQI-interaction algorithm, not the language — and the
+  prototype proves it on purpose.** The correctness of this design is entirely in
+  *how it drives the MQI* (two puts in one syncpoint with the same MsgId; get-and-
+  copy in one UOW; browse the archives) — logic that is essentially identical
+  across MQI bindings. So the lab prototypes in **Python (pymqi)** deliberately,
+  even though the app team's gateway is **C++**: prototyping in a *different*
+  language than the target is itself the argument — if the language mattered we
+  would prototype in the target language; that we don't need to is the evidence it
+  doesn't. Raw performance is the only real language axis, and it is not a
+  boundary at this scale (§R10). (The C++ MQ interface is historically a thin
+  wrapper over the C MQI, so the verbs map closely; a proper per-language
+  "how to drive the MQI well" comparison is possible future work, not a blocker.)
+  **We call this out explicitly in the reporting** so the choice reads as
+  deliberate, not as a shortcut.
 - **No silent loss / no silent failures.** The design's central correctness
   goal (I1 below). Note the lab's standing rule that **browse-mode is not for
   draining** a live queue (it accumulates, it does not consume) — which is
