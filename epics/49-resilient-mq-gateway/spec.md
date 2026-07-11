@@ -156,7 +156,7 @@ Every non-confirmed item has a matching entry in §11.
 | **R9** | The "internal gateway serial number" is an **implementation artifact**, not a requirement. We are free to choose the correlation key and the store. | confirmed |
 | **R10** | Scale: **low volume, bursty, latency-tolerant**; not high-frequency; plausibly **+1–2 orders of magnitude** later. | confirmed (orders of magnitude only) |
 | **R11** | **Data-at-rest:** retaining a business day of messages reclassifies data from in-transit to at-rest and may trigger on-disk encryption / retention requirements. | inferred |
-| **R12** | Operating model: archive holds **one business day**, cleared at start-of-day after reconciliation; replay horizon is **intraday**. | inferred |
+| **R12** | Operating model: archive holds **one rolling business day**, **self-clearing via `CAPEXPRY`** (no start-of-day / end-of-day batch); replay horizon is **intraday**. | inferred |
 
 ## 5. Rung 0 — the team's design (steelman, then stress-test)
 
@@ -398,6 +398,36 @@ this design stays away from; data-at-rest is handled at the storage layer, not
 the message layer. Options are presented factually, inside the MQ-native
 boundary — no over-proposing.
 
+**Data in transit is mutual TLS, not optional.** In a hardened estate the app
+`SVRCONN` channels enforce TLS 1.3 with `SSLCIPH(ANY_TLS13_OR_HIGHER)` and peer
+pinning (`SSLPEER`), so the gateway **must present a client certificate** — plain
+TCP will not connect. The gateway therefore needs its own client keystore
+(matching the channel's peer, e.g. `O=app-org`), minted by the estate's PKI. This
+was confirmed the hard way in the lab demonstration: the same code that connected
+before the estate's TLS work failed at connect afterward until TLS was added.
+
+## 10.1 Capacity, retention & scale
+
+**Self-clearing retention (retires SOD/EOD clearing).** Each archived copy is
+capped by `CAPEXPRY` to a rolling 24 hours, so the archive bounds itself to one
+trading day and clears **without** a start-of-day / end-of-day batch (R12).
+Reconciliation is scoped to the current trading day; prior-day copies are ignored
+and expire on their own.
+
+**Capacity.** At ~1M messages/day of ~200 KB, a day of archive is ~200 GB. The
+**single queue-file size is not the limit** — `MAXFSIZE(DEFAULT)` is ~2 TB — but
+`MAXDEPTH` must be raised well above the 5000 default. Size `/var/mqm` for a day of
+archive on each queue-manager node.
+
+**Reconciliation cost (measured).** The diff is cheap — matching ~2M headers is
+~1 s of CPU. The bottleneck is the **client-mode `MQGET(BROWSE)` round-trip per
+header** (~640 µs measured live), extrapolating to **~21 minutes for a full-archive
+scan at 1M/day**. So the levers are the scan's *transport and incrementality*, not
+the algorithm: run the reconciler on the queue-manager node over **local bindings**,
+and **reconcile incrementally** (only messages since the last mark; a full scan is
+needed only for cold recovery). `CAPEXPRY` bounds the worst case; the diff needs no
+work. (Full analysis in the lab's `docs/scale-analysis.md`.)
+
 ## 11. Open questions for the application team (the deliverable's payload)
 
 **Inbound path (the vaguest area):**
@@ -471,6 +501,17 @@ the lab exposes.
   gateway to reproduce the **host-loss silent-loss** scenario directly and
   contrast it with the MQ-native option holding. The primary demonstration is the
   MQ-native archive + observability story above; this is additive if pursued.
+
+**Delivered (2026-07-10).** The demonstration ran end-to-end against real **Native
+HA** MQ over **mutual TLS 1.3**: the gateway provisioned its own queues, streaming
+(`MUSTDUP`) archives, `CAPEXPRY`, reconcile exporter and Grafana board as a
+loosely-coupled parasite. A simulated trading day with a confirmation outage ended
+at **sent 70 / confirmed 52 / unconfirmed 18** — reconciliation identifying exactly
+the outage trades, by MsgId, with sent-time and age. Two refinements to this plan
+landed from what shipped: **`CAPEXPRY` replaced the SOD/EOD clearing** described
+above (the archive self-clears; §10.1), and the primary archive is the
+**queue-manager streaming copy** (`MUSTDUP`), the app-level two-put being the
+fallback (§6). Full write-up in the lab's `docs/proof-of-concept.md`.
 
 ## 13. Scope, phasing & the parallel scaffolding track
 
