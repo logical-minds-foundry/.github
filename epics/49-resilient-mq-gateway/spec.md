@@ -414,10 +414,13 @@ trading day and clears **without** a start-of-day / end-of-day batch (R12).
 Reconciliation is scoped to the current trading day; prior-day copies are ignored
 and expire on their own.
 
-**Capacity.** At ~1M messages/day of ~200 KB, a day of archive is ~200 GB. The
-**single queue-file size is not the limit** — `MAXFSIZE(DEFAULT)` is ~2 TB — but
-`MAXDEPTH` must be raised well above the 5000 default. Size `/var/mqm` for a day of
-archive on each queue-manager node.
+**Capacity.** At ~1M messages/day of ~200 KB, each archive holds ~**195 GiB/day**
+— ~**400 GiB across the outbound and inbound archives** — bounded at one day by
+the rolling TTL. The **single queue-file size is not the limit** —
+`MAXFSIZE(DEFAULT)` is ~2 TB, an order of magnitude above a day's volume — but
+`MAXDEPTH` must be raised well above the 5000 default; `MAXMSGL` stays the 4 MB
+default (ample for ~200 KB). Size `/var/mqm` for a day of archive on **each**
+Native HA node (the data is replicated).
 
 **Reconciliation cost (measured).** The diff is cheap — matching ~2M headers is
 ~1 s of CPU. The bottleneck is the **client-mode `MQGET(BROWSE)` round-trip per
