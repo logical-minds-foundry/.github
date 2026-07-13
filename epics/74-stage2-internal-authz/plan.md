@@ -72,7 +72,11 @@ authz_grants:
   - { group: mqapp, object_type: qmgr,  object: "",            authorities: "+connect +inq" }
   - { group: mqapp, object_type: queue, object: "SVC.REQUEST", authorities: "+put" }
   - { group: mqapp, object_type: queue, object: "APP.REPLY",   authorities: "+get +inq +browse" }
-  # monitoring: read-only — connect + inquire + subscribe metric topics; NO put/get
+  # monitoring: read-only — connect + inquire + subscribe metric topics; NO put/get.
+  # NOTE (to narrow — do NOT ship the root grant): SYSTEM.BASE.TOPIC is the topic-tree
+  # ROOT and over-grants (subscribe to everything), against the least-privilege thesis.
+  # It is a PLACEHOLDER: the exact topic object scoping the $SYS/MQ resource-monitoring
+  # tree is pinned against the LIVE exporter in Task 5, then substituted here.
   - { group: mqmon, object_type: qmgr,  object: "",                 authorities: "+connect +inq" }
   - { group: mqmon, object_type: topic, object: "SYSTEM.BASE.TOPIC", authorities: "+sub" }
   - { group: mqmon, object_type: queue, object: "APP.REPLY",        authorities: "+dsp +inq" }
@@ -82,9 +86,13 @@ authz_grants:
   - { group: mqsvc, object_type: queue, object: "APP.REPLY",       authorities: "+put" }
   - { group: mqsvc, object_type: queue, object: "{{ mqsvc_dlq }}", authorities: "+put" }
 
-# DLQ the receiver MCA may fall back to. Interim = the QM-wide DLQ; revisit once
-# the per-channel-vs-QM-level DLQ research (Part B) lands. authz.mqsc.j2 sets it
-# as the QM DEADQ so the fallback path actually exists.
+# DLQ the receiver MCA falls back to. INTERIM (pending the per-channel-vs-QM-level
+# DLQ research, Part B): grant +put on the QM-wide DLQ + set it as DEADQ (authz.mqsc.j2)
+# so an undeliverable reply can't stall the RCVR channel — a resiliency lab must not
+# ship a known channel-stall. The research owns the FINAL shape (a dedicated
+# per-counterparty DLQ vs this shared one); the N5 induced test (validation-hardening
+# follow-up) confirms the fallback works and FEEDS the research — it does not
+# rubber-stamp this interim.
 mqsvc_dlq: "SYSTEM.DEAD.LETTER.QUEUE"
 ```
 
@@ -403,14 +411,25 @@ Create `ansible/site-pcmk-authz-validate.yml`. It runs on the app host (where th
     app_qm: "{{ qm_app }}"
     app_conn: "pcmk-vip-a.client.com(1414)"
     mon_keyrepo: /var/mqm/ssl/mq_prometheus   # stem placed by mq-exporter/mq-client
+    app_keyrepo: /var/mqm/ssl/app-client      # stem placed by mq-client
   tasks:
-    # NEGATIVE: mqmon (OU=ops via MON.SVRCONN) must be denied a put.
+    # NEGATIVE N1: mqmon (OU=ops via MON.SVRCONN) must be denied a put.
     - name: mqmon MQPUT to APP.REPLY is denied (2035)
       ansible.builtin.command: >
         python3 clients/authz_probe.py --qmgr {{ app_qm }} --conn "{{ app_conn }}"
         --channel MON.SVRCONN --cipher {{ tls_cipher }} --keyrepo {{ mon_keyrepo }}
         --queue APP.REPLY --op put --expect 2035
       args: { chdir: /opt/mqlab }   # wherever clients/ is synced on the app host
+      changed_when: false
+
+    # NEGATIVE N3: mqapp (OU=apps via APP.SVRCONN) may PUT SVC.REQUEST but is denied
+    # a GET from it — least privilege within the app's own queues.
+    - name: mqapp MQGET from SVC.REQUEST is denied (2035)
+      ansible.builtin.command: >
+        python3 clients/authz_probe.py --qmgr {{ app_qm }} --conn "{{ app_conn }}"
+        --channel APP.SVRCONN --cipher {{ tls_cipher }} --keyrepo {{ app_keyrepo }}
+        --queue SVC.REQUEST --op get --expect 2035
+      args: { chdir: /opt/mqlab }
       changed_when: false
 
     # POSITIVE: the app trade flow still completes end-to-end.
@@ -462,7 +481,16 @@ Create `ansible/site-pcmk-authz-validate.yml`. It runs on the app host (where th
       changed_when: false
 ```
 
-> **Grounding note for the implementer:** confirm three things against the live arm before finalizing — (1) the exact `mq_prometheus` keystore stem/path placed by `mq-exporter`; (2) that `app_requester.py` supports a one-shot `--once` (add it if not); (3) the app-host sync path for `clients/` (`chdir`). These are known-unknowns, not guesses — verify, don't assume.
+> **Grounding note for the implementer:** confirm three things against the live arm before finalizing — (1) the exact `mq_prometheus` and `app-client` keystore stems/paths placed by `mq-exporter`/`mq-client`; (2) that `app_requester.py` supports a one-shot `--once` (add it if not); (3) the app-host sync path for `clients/` (`chdir`). These are known-unknowns, not guesses — verify, don't assume.
+
+> **Scoped this slice: N1 + N3 (+ positives + post-failover).** Spec §10's other
+> negatives are a **validation-hardening follow-up** (Part B), for good reason:
+> **N4** (assert-ownership) can't be induced cleanly client-side — spoofing
+> `MQMD.UserIdentifier` needs `MQPMO_SET_IDENTITY_CONTEXT` + `+setid`, so N4 is a
+> receiver-side demo entangled with the `+setall`/`PUTAUT(CTX)` research and belongs
+> with it. **N5** (undeliverable/DLQ) is coupled to the per-channel-DLQ research.
+> **N2** (unmapped cert → back-stop) needs a throwaway unmapped cert. All three land
+> once their coupled research does.
 
 - [ ] **Step 3: Run the validation against the live arm**
 
@@ -495,7 +523,8 @@ These are the remaining epic tasks. Part A is the first implementable slice; the
 |---|---|---|---|
 | Research: `+setall` / `PUTAUT(CTX)` | research (task) | — | Verify against IBM docs whether `PUTAUT(CTX)` forces `+setid`/`+setall` and whether our `PUTAUT(DEF)` avoids it (spec §8). May confirm or adjust Task 3/4. |
 | Research: per-channel vs QM-level DLQ | research (task) | — | Settle whether a dedicated per-counterparty DLQ is possible; then confirm/replace the interim `mqsvc_dlq` = `SYSTEM.DEAD.LETTER.QUEUE` grant (spec §7.1). |
-| Induced-denial validation (pcmk) | **validation** | Tasks 1–5 merged | The `site-pcmk-authz-validate.yml` run + cold rebuild → `Outcome: SUCCESS`. |
+| Induced-denial validation (pcmk) | **validation** | Tasks 1–5 merged | The `site-pcmk-authz-validate.yml` run (N1 + N3 + positives + post-failover) + cold rebuild → `Outcome: SUCCESS`. |
+| Validation hardening: N2 + N4 + N5 | **validation** | `+setall` research (N4), per-channel-DLQ research (N5) | The spec §10 negatives deferred from the first slice: **N2** unmapped cert → back-stop (`AMQ9777`); **N4** assert-ownership (receiver-side, needs `+setid`/context — pairs with the `+setall` research); **N5** undeliverable/DLQ path (pairs with the DLQ research). |
 | Fan-out to `nativeha` | task (impl) | pcmk validation | Apply `authz.yml` + `mq-authz-accounts` + the `authz.mqsc.j2` snippet to the Native HA arm; bind maps to its channel names (`NHARAPP.NHARSVC`). |
 | Fan-out to `rdqm` | task (impl) | pcmk validation | Same delta for the RDQM arm (`RDQMAPP`); accounts on all RDQM nodes. |
 | Confirm mqweb REST authorization posture | **validation** | — | `pymqrest`→mqweb is governed by mqweb roles, not `MCAUSER`; verify it is not wide-open admin (outside the OAM model). |
@@ -506,7 +535,9 @@ These are the remaining epic tasks. Part A is the first implementable slice; the
 
 ## Self-Review
 
-**Spec coverage:** §3–§6 → Tasks 1–4; §5.1a cutover safety → Task 3 ordering (channels first, CHLAUTH flip after, atomic batch); §7/§7.1 grants + DLQ fork → Task 1/4 + `mqsvc_dlq` + Part B DLQ research; §8 `+setall`/DLQ research → Part B; §9 follow-ups → Part B + bookends; §10 validation → Task 5; §6 substrate invariant + cold rebuild → Task 2 (all-node) + Task 6. Covered.
+**Spec coverage:** §3–§6 → Tasks 1–4; §5.1a cutover safety → Task 3 ordering (channels first, CHLAUTH flip after, atomic batch); §7/§7.1 grants + DLQ fork → Task 1/4 + `mqsvc_dlq` (interim, explicitly research-owned) + Part B DLQ research; §8 `+setall`/DLQ research → Part B; §9 follow-ups → Part B + bookends; §10 validation → Task 5 (N1 + N3 + positives + post-failover now; N2/N4/N5 in the Part B validation-hardening task, each coupled to its research); §6 substrate invariant + cold rebuild → Task 2 (all-node) + Task 6. Covered, with the §10 negatives split first-slice-vs-hardening per the alignment review.
+
+**Alignment decisions folded in (2026-07-13):** (1) Task 5 expanded to N1+N3; N2/N4/N5 deferred to a Part B validation-hardening task coupled to the `+setall` and DLQ research. (2) The `mqsvc` DLQ grant is an explicit *interim* (QM-wide DLQ, outage-safe), with the per-channel-DLQ research owning the final shape. (3) The `mqmon` `+sub` on `SYSTEM.BASE.TOPIC` is flagged a to-be-narrowed placeholder (pinned against the live exporter in Task 5), not shipped as a root grant.
 
 **Placeholders:** none — every step has concrete file paths, MQSC, YAML, `setmqaut`, and probe code. Three explicitly-flagged known-unknowns (exporter keystore path, `app_requester --once`, app-host sync path) are marked "verify on the live arm," not silently assumed.
 
