@@ -229,27 +229,33 @@ Independent of the box work (each an inefficiency in its own right):
 
 ### 4.5 Staleness discipline
 
-A fat box now bakes **versioned** software (MQ 9.4.5.0, a pinned alloy,
-node-exporter, the compiled exporter, RDQM packages) and freezes its OS packages at
-bake time. Three mechanisms, scaled to *only what must last until the next
-iteration*:
+A fat box bakes **versioned** software (MQ 9.4.5.0, a pinned alloy, node-exporter,
+the compiled exporter, RDQM packages) and freezes its OS packages at bake time.
 
-1. **Base-OS update at instance-build.** When a bootstrap builds an instance *on
-   top of* a frozen box, it runs the base package update (`dnf`/`apt update`) so the
-   OS comes current despite the frozen image — the standard frozen-build practice.
-   This covers the base system; external packages with their own bespoke update
-   paths are out of that sweep and are refreshed by rebuilding the box.
-2. **Manifest-hash rebuild.** The box is stale when its **bake manifest** — the
+**OS currency comes from *rebuilding the box*, not from updating it at boot.**
+(This reverses an earlier draft of this section, which had a base-OS refresh — a
+`dnf`/`apt` update — run at instance-build. Implementation proved that wrong:
+pinning and dynamic update are fundamentally in tension. A blanket
+`dnf update`/`apt dist-upgrade` fights the pinned baked stacks — on the
+kernel-pinned RDQM box it hit a hard, unsatisfiable **depsolve conflict**, trying
+to replace the baked **LINBIT** pacemaker/DRBD stack with the DVD's stock
+pacemaker. As long as we pin, the pins must be **persistent**, so we sacrifice the
+dynamic update. See `mq-resiliency-lab-for-linux#639`.)
+
+Two mechanisms, scaled to *only what must last until the next iteration*:
+
+1. **Manifest-hash rebuild.** The box is stale when its **bake manifest** — the
    baked package/version set — changes; then it is rebuilt, otherwise the cache is
    reused.
-3. **Graduated age policy (stricter than today's 30-day NOTICE):** **warn at 7
+2. **Graduated age policy (stricter than today's 30-day NOTICE):** **warn at 7
    days, refuse at 14** (demand a rebuild). Until an automated build exists, force a
    weekly manual rebuild rather than letting boxes rot.
 
-The longer-term direction — an out-of-band CI/manifest job that rebuilds (and
-perhaps publishes) the boxes daily/weekly like container images, so CVEs and build
-breaks surface fast — is **explicitly out of scope here** and seeded to the
-follow-on (§8). This epic implements 1–3 only.
+Pins are kept fresh by **periodically revisiting them and rebuilding** — the
+box-rebuild cadence *is* the OS/security-update cadence. The longer-term direction —
+an out-of-band CI/manifest job that rebuilds (and perhaps publishes) the boxes
+daily/weekly like container images, so CVEs and build breaks surface fast — is
+**explicitly out of scope here** and seeded to the follow-on (§8).
 
 ## 5. Binding decisions (explicit)
 
@@ -350,8 +356,8 @@ Implementation tasks (land in `mq-resiliency-lab-for-linux`, linked under `#70`)
    fetches; no entitlement artifact enters a committed box or shared cache** (§4.2).
 3. **`mq-rdqm-rhel9`** — bake MQ + RDQM (kernel-pinned) + node-exporter + alloy +
    exporter binary + build tools + `acl` + the #569 qm.ini default; boot the RDQM
-   nodes from it; strip the now-baked installs from the per-run path; add the
-   base-OS update (§4.5.1) to the configure path (cross-cutting to all boxes).
+   nodes from it; strip the now-baked installs from the per-run path. (No base-OS
+   refresh at instance-build — §4.5; OS currency is a box-rebuild concern.)
 4. **`obs-ubuntu2404`** — bake the observability stack; boot `obs` from it.
 5. **`infra-ubuntu2404`** — bake BIND + core infra; boot the infra/DNS nodes.
 6. **Standalone eliminations** — `acl` anomaly root-cause; DRBD 3→1 GiB;
