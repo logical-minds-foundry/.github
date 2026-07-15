@@ -113,15 +113,27 @@ sub-packages is an implementation detail deferred to the build, not decided here
 ### 3.2 Collectors — per-technology modules, fail-loud activation
 
 The package carries a collector **per technology**, activated by **explicit
-configuration with fail-loud auto-detect**:
+configuration, with auto-detect as a convenience layered on top**. Explicit
+config is the reliable backbone; detection never overrides it.
 
-- Auto-detect probes for the presence of each stack — `dspmq -o nativeha`
-  success, `rdqmstatus` availability, `crm_mon` availability — and enables the
-  matching collector(s).
-- An **ambiguous or unrecognized stack is a loud error**, never a silent guess:
-  the collector refuses to emit wrong-shaped metrics and surfaces a detectable
-  signal. (This is the OSS boundary principle, §8, applied to detection.)
-- Explicit configuration always overrides detection.
+Detection resolves by **precedence and exclusion**, not by treating the probes
+as independent — because they are not. RDQM **bundles its own Pacemaker/DRBD**,
+so on an RDQM node both `rdqmstatus` **and** `crm_mon` answer (verified:
+`rdqmstate.py` itself parses `crm_mon --one-shot --output-as=xml`). Naive
+"any-probe-that-answers" detection would double-activate the generic
+`clusterstate` collector on every RDQM node and double-emit overlapping
+`cluster_*`/`cluster_drbd_*` series. The resolution order:
+
+1. **RDQM** (`rdqmstatus` present) → `rdqmstate` **only**; explicitly suppress the
+   generic `clusterstate` even though `crm_mon` answers (RDQM's Pacemaker is
+   internal to it).
+2. **Native HA** (`dspmq -o nativeha` succeeds) → `nativehastate`.
+3. **Standalone Pacemaker** (`crm_mon` present **and not** RDQM) → `clusterstate`.
+
+**Fail loud only on genuinely unresolvable combinations** — not on RDQM's
+legitimate both-probes-answer case, which precedence handles. An unrecognized
+stack surfaces a detectable signal and refuses to emit wrong-shaped metrics (the
+§8 boundary principle applied to detection).
 
 Collection mechanism (unchanged from the lab, and deliberately conservative):
 each collector writes a node_exporter **textfile** `.prom` **atomically**
@@ -163,10 +175,13 @@ entry points (`src/mqlab/{dashboard,clusterboard,messagingboard,qmboard}.py`),
 which bake in lab specifics.
 
 **Source-of-truth rule:** the generator derives its profile from the existing
-`src/mqlab/setups.py` source of truth for QM names (plus the cluster/DRBD
-resource names `setups.py` does not itself cover), **never a new, competing
-parameter source**. In the lab, `setups.py` feeds the profile; an external
-adopter supplies their own profile values.
+`src/mqlab/stacks.py` source of truth for QM names (`lab_stacks()`; QM names are
+derived as `f"{short}APP"` / `f"{short}SVC"`), plus the cluster/DRBD resource
+names `stacks.py` does not itself cover — **never a new, competing parameter
+source**. In the lab, `stacks.py` feeds the profile; an external adopter supplies
+their own profile values. *(Note: the parent roadmap #368 §4.3 names this file
+`setups.py`, which does not exist; that stale reference should be corrected in
+the member repo — the SOT landed as `stacks.py` via #351/#353.)*
 
 Two dashboard families fall out of this, and they sequence differently (§4):
 
@@ -202,6 +217,46 @@ front**, even though slice 1 implements only the RPM adapter:
   (§10). Candidate builders — a single-config multi-format tool (`nfpm`, `fpm`)
   vs. native `rpmbuild` + `dpkg-deb` — and the publish channel are **open
   questions** settled in the packaging sub-brainstorm (§11), not here.
+
+### 3.6 Package lifecycle & the node_exporter textfile boundary
+
+The collectors physically depend on one thing this component does **not** own:
+node_exporter's **textfile collector** must read the directory the collectors
+write `.prom` files into. If that wiring is wrong, the collectors run happily and
+the metrics **silently never appear** — the same failure shape as the §3.3 label
+trap. But node_exporter's configuration is *across the ownership boundary* (§8):
+it may be a package-owned or config-managed file we cannot safely touch. So this
+component **declares-and-verifies; it does not mutate**:
+
+- **The textfile directory is a required, explicit configuration input** — no
+  assumed default path. We write into the directory the operator designates as
+  the one node_exporter watches.
+- **Install-time gate** (RPM `%post` / deb `postinst`): **fail the install
+  loudly** if the directory is unspecified or not writable by the collector's
+  service user. Never silently proceed against an unusable path.
+- **No cross-boundary mutation by default.** We do **not** patch node_exporter's
+  config to point it at us. We *may* document, and offer as an explicit,
+  consent-gated **opt-in** helper, a way to register a textfile directory — but
+  only for operators whose node_exporter config is theirs to patch. Default is
+  declare-and-verify.
+- **Shared-path caution.** The textfile directory is shared with other collectors
+  and packages. We document the required permissions (the lab's `02775` setgid +
+  `systemd-tmpfiles` pattern, commit `5496637`) but we do **not** assume we can
+  `chmod` a directory we don't own.
+- **Runtime self-check backstop.** Each run verifies the directory is writable; on
+  failure it emits a loud health signal and a stale `*_last_write_timestamp`,
+  never a silent gap.
+- The **README integration section** states the boundary plainly: we write where
+  you tell us; wiring node_exporter to watch it is the integrator's
+  responsibility.
+
+**Clean removal.** Package removal (`rpm -e` / `apt remove`) is a first-class
+concern, not deferred: `%preun`/`%postun` + `prerm`/`postrm` **stop and disable
+the timers** and **remove the artifacts we own** — our units and the `.prom`
+files *we* wrote (stale textfiles left behind would keep feeding last-known
+values into Prometheus, a lie). Removal touches **only what we own**: the shared
+textfile directory itself and other packages' files are left untouched — the
+uninstall mirror of the boundary rule.
 
 ## 4. Build order
 
@@ -267,9 +322,16 @@ prepared answer table.
 ## 6. Discovery — other CLI-only / filesystem-only MQ metrics
 
 The charter (§2.1) generalizes beyond clustering: **what MQ-level operational
-state is CLI-only or filesystem-only and absent from `mq_prometheus`?** A
-discovery task enumerates candidates and feeds **slice 2+** — it does **not**
-widen slice 1. Initial candidates:
+state is CLI-only or filesystem-only and absent from `mq_prometheus`?**
+
+**This epic's §6 work is discovery-only.** Its *implementation* scope stays the
+clean extraction of the three existing collectors (the harden-and-extract
+thesis); it does **not** build any new collector. The discovery task produces a
+written, prioritized candidate list; **building** the top candidate (FFST
+count/age) is spun into slice work or a successor epic by the follow-on
+brainstorm ([#81](https://github.com/logical-minds-foundry/.github/issues/81)) —
+"extract what exists," not "extract + invent." Initial candidates, in rough
+priority order:
 
 - **FFST/FDC files** in `/var/mqm/errors` — **count** and **oldest-age** metrics.
   When FFSTs start appearing they arrive in bursts; a count-and-age pair is a
@@ -299,8 +361,9 @@ but may be pulled into its own independent brainstorm; it gates nothing.
 
 - **OSS ownership boundary.** The component configures only what it owns and
   **declares-and-loudly-verifies** what it does not. It **never** edits a
-  consumer's `qm.ini`, **never** restarts a queue manager, and never assumes the
-  operator's start/stop mechanism. In the lab we own everything; an external
+  consumer's `qm.ini`, **never** restarts a queue manager, **never** mutates
+  node_exporter's config (§3.6), and never assumes the operator's start/stop
+  mechanism. In the lab we own everything; an external
   adopter does not, and the code holds that line. A monitored-but-misconfigured
   target surfaces a health signal, never a silent empty panel.
 - **Fail loud — no stale panels.** A failed scrape reads as `up == 0` (a red
@@ -318,6 +381,12 @@ but may be pulled into its own independent brainstorm; it gates nothing.
 - **Contract-consistency CI test** — every metric a panel queries, a collector
   emits (§3.3, half 1).
 - **Packaging** — `ansible-lint` / the pipeline's package-build checks.
+- **Detection precedence** — tests that an RDQM-shaped environment activates
+  `rdqmstate` and suppresses `clusterstate`, that standalone Pacemaker activates
+  `clusterstate`, and that config overrides detection (§3.2).
+- **Install / uninstall boundary** — the install-time gate fails loud on an
+  unspecified or unwritable textfile directory, and package removal stops+disables
+  the timers and removes only our own artifacts (§3.6).
 - **Cold-rebuild proof, per format** (§4.3).
 
 A component is **"extracted"** (from #368 §8) only when **all** hold: published
