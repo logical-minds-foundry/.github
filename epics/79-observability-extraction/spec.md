@@ -291,18 +291,23 @@ high-value code.
 - The **portable dashboards**: stock-only boards first (no collector dependency),
   then the cluster/HA boards on the contract.
 
-### 4.3 Per-package cold-rebuild validation
+### 4.3 Validation — per-package install checks + a final cold rebuild
 
-"Done" is proven per **package format**, not once at the end. Two validation
-tasks gate the epic:
+Validation is **two-tier**, matching cost to purpose:
 
-- [#644](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/644)
-  — `.rpm` installs and runs one-pass on the RHEL nodes.
-- [#645](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/645)
-  — `.deb` installs and runs one-pass on the Ubuntu nodes.
-
-Each is blocked-by its format's implementation/deploy tasks (wired when those are
-filed from the plan).
+- **Per-package install validation (fast).** Each published package is proven by
+  installing it on a **single ad-hoc VM build** — the `.rpm` on a RHEL VM
+  ([#644](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/644)),
+  the `.deb` on an Ubuntu VM
+  ([#645](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/645))
+  — confirming timers active and metrics scraping. **No full lab rebuild is
+  needed to validate a package.** Each is blocked-by its format's dogfood tasks.
+- **Final full-lab cold rebuild (integration).** One full VM cold rebuild of the
+  **entire lab** comes up one-pass with the published component installed across
+  the mixed RHEL/Ubuntu fleet — inherently exercising **both** formats in a
+  single bring-up. This is the standing cold-rebuild acceptance gate and the last
+  thing to close; it is filed as a **new** validation task blocked-by #644, #645,
+  and the dashboards work.
 
 ## 5. Repository bootstrap & the cross-org tooling dependency
 
@@ -387,7 +392,8 @@ but may be pulled into its own independent brainstorm; it gates nothing.
 - **Install / uninstall boundary** — the install-time gate fails loud on an
   unspecified or unwritable textfile directory, and package removal stops+disables
   the timers and removes only our own artifacts (§3.6).
-- **Cold-rebuild proof, per format** (§4.3).
+- **Per-package install validation** on an individual VM (fast), plus a **final
+  full-lab cold-rebuild** integration proof (§4.3).
 
 A component is **"extracted"** (from #368 §8) only when **all** hold: published
 release **+** the lab installs the published artifact **+** the in-lab copy is

@@ -156,10 +156,10 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
   Pacemaker resolvers arrive with their collectors (T8, T9).
 - **Interfaces — Produces:** `resolve(probes, config) -> set[Collector]`;
   probe seams `probe_nativeha()`, `probe_rdqm()`, `probe_pacemaker()` (RDQM/pcmk
-  return stubs until T8/T9).
+  return stubs until T12/T13).
 - **Tests:** Native HA env activates `nativeha`; config override wins; an
   unresolvable/unknown combination fails loud; the RDQM-both-probes case is
-  asserted here as a **table stub** and completed in T8.
+  asserted here as a **table stub** and completed in T12.
 - **Acceptance:** no path silently guesses; config always overrides.
 
 ### Task 4: Package the Native HA collector — timer, textfile boundary, RPM
@@ -184,7 +184,7 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
   and **textfile-boundary** prerequisites).
 - **Deliverable:** the versioned `cluster_nha_*` emitted-families half of the
   contract, plus the CI **consistency test harness** (every metric a board queries
-  is one a collector emits — exercised fully once boards land in T10).
+  is one a collector emits — exercised fully once boards land in T14).
 - **Tests:** the contract lists exactly what `collect_nativeha` emits; the harness
   fails if a listed family is not emitted.
 - **Acceptance:** README leads with the label + textfile-dir traps.
@@ -229,14 +229,15 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 - **Acceptance:** lab has no local copy; provisioning uses only the published
   artifact.
 
-### Task 10 *(= filed validation #644)*: Cold-rebuild proof — `.rpm` on RHEL
+### Task 10 *(= filed validation #644)*: Install validation — `.rpm` on an individual RHEL VM
 
-**Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T8, T9.
-**Gate step:** 6. *(validation-kind)*
+**Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T8, T12, T13 (all
+rpm-format collectors dogfooded). **Gate step:** 6 (lightweight). *(validation-kind)*
 
-- **Deliverable:** a full VM cold rebuild installs and runs the published `.rpm`
-  Native HA collector **one-pass** on the RHEL node; metrics live; `Outcome:
-  SUCCESS` recorded as a comment.
+- **Deliverable:** the published `.rpm` installs and runs on a **single ad-hoc
+  RHEL VM build** — *not* a full lab rebuild — with timers active, `.prom`
+  present, and metrics scraping; `Outcome: SUCCESS` recorded as a comment. This is
+  the fast per-format package check; the whole-lab integration is **Task 19**.
 
 ---
 
@@ -289,13 +290,14 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 - **Acceptance:** boards render from a profile; lab repoints to the published
   generator; in-lab builders deleted.
 
-### Task 15 *(= filed validation #645)*: Cold-rebuild proof — `.deb` on Ubuntu
+### Task 15 *(= filed validation #645)*: Install validation — `.deb` on an individual Ubuntu VM
 
-**Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T11, T12/T13 as
-applicable. **Gate step:** 6. *(validation-kind)*
+**Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T11 (deb adapter) +
+the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 
-- **Deliverable:** a full cold rebuild installs and runs the published `.deb`
-  one-pass on the Ubuntu node(s); `Outcome: SUCCESS`.
+- **Deliverable:** the published `.deb` installs and runs on a **single ad-hoc
+  Ubuntu VM build** — timers active, metrics scraping; `Outcome: SUCCESS`. Fast
+  per-format package check; the whole-lab integration is **Task 19**.
 
 ---
 
@@ -326,6 +328,19 @@ applicable. **Gate step:** 6. *(validation-kind)*
   in a from-scratch Grafana, incl. a **JSON-import availability test** + UI-only
   fallback. Not a product doc; may be pulled into its own brainstorm.
 
+### Task 19 *(new validation — full-lab cold rebuild)*: Final integration gate
+
+**Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T10 (#644), T15
+(#645), T14 (dashboards). **Gate step:** 6 (integration). *(validation-kind — to
+be filed under the epic, blocked-by #644, #645)*
+
+- **Deliverable:** a **full VM cold rebuild of the entire lab** comes up
+  **one-pass** with the published component installed across the mixed
+  RHEL/Ubuntu fleet — one bring-up that inherently exercises both `.rpm` and
+  `.deb` — with dashboards live; `Outcome: SUCCESS` recorded. This is the final
+  integration test and the standing cold-rebuild acceptance gate; it gates epic
+  closure.
+
 ### Bookends *(already filed)*
 
 - **#643** documentation review (multi-repo: lab `docs/site` + org `docs` repo if
@@ -339,13 +354,15 @@ applicable. **Gate step:** 6. *(validation-kind)*
 ## Dependency graph (task → blocked-by)
 
 ```
-T0(#82) ─┬─ T1 ─┬───────────────── T4 ─ T6 ─ T7 ─ T8 ─ T9 ─ T10(#644)
+T0(#82) ─┬─ T1 ─┬───────────────── T4 ─ T6 ─ T7 ─ T8 ─ T9
          │      │                  │
          ├─ T2 ─┼─ T3 ─────────────┘
          │      └─ T5 ──────────────────────────── (contract)
          └───────────────────────────
    T11(deb) ⟵ T4        T12(rdqm) ⟵ T2,T3,T11     T13(pcmk) ⟵ T2,T3,T12
-   T14(dashboards) ⟵ T5,T12,T13      T15(#645) ⟵ T11,(T12/T13)
+   T14(dashboards) ⟵ T5,T12,T13
+   T10 install-val(#644) ⟵ T8,T12,T13     T15 install-val(#645) ⟵ T11,T12,T13
+   T19 full-lab cold rebuild ⟵ T10,T15,T14     ← final integration gate (epic close)
    T16 discovery — independent      T17 packaging sub-brainstorm — before close
    T18 playbook ⟵ T14 (out-of-band)
 ```
@@ -360,7 +377,7 @@ T0(#82) ─┬─ T1 ─┬───────────────── T
 - §3.5 dual-format packaging up front → T1 (core+rpm+deb stub) / T11 (deb).
 - §3.6 textfile boundary + clean removal → T1 scripts, T4 wiring, tests in T4.
 - §4 build order + six-step gate → T2–T10 (slice 1), T11–T15 (slice 2+); per-format
-  cold rebuild → T10(#644)/T15(#645).
+  install validation → T10(#644)/T15(#645); full-lab cold-rebuild integration → T19.
 - §5 repo bootstrap + cross-org dep → T0(#82). §6 discovery-only → T16.
 - §7 adopter playbook → T18. §9 testing/DoD → per-task tests + T6 CI + T10/T15.
 - §10 follow-on → #81. §11 open questions → T0 (naming), T17 (packaging/publish).
