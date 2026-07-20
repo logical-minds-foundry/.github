@@ -110,12 +110,12 @@ class:
 | INHIBTEV | Get Inhibited (+ Put Inhibited) | `ALTER QLOCAL GET(DISABLED)` → attempt get | QMGR.EVENT |
 | LOCALEV | Unknown Object Name | open a non-existent queue | QMGR.EVENT |
 | REMOTEEV | Remote Queue Name Error | misconfigured remote-queue def → put | QMGR.EVENT |
-| PERFMEV | Queue Full (+ Queue Depth High) | `MAXDEPTH(n)` + `QDPHIEV(ENABLED)` → fill | PERFM.EVENT |
+| PERFMEV | Queue Full (+ Queue Depth High) | `MAXDEPTH(n)` + `QDPMAXEV(ENABLED)` (full) / `QDPHIEV(ENABLED)` (high) → fill | PERFM.EVENT |
 | CHLEV | Channel Started / Stopped | `START` / `STOP CHANNEL` | CHANNEL.EVENT |
 | CONFIGEV | Create / Change object | `DEFINE` / `ALTER` with CONFIGEV on | CONFIG.EVENT |
 | CMDEV | Command | any MQSC command with CMDEV on | COMMAND.EVENT |
 | STRSTPEV | Queue Mgr Active | queue-manager start (Native HA nuance) | QMGR.EVENT |
-| LOGGEREV | Logger | **best-effort** — needs linear logging; may defer | LOGGER.EVENT |
+| LOGGEREV | Logger | **best-effort, likely deferred** — needs linear logging; Native HA uses its own log-replication model, so the classic Logger event may never fire | LOGGER.EVENT |
 | SSLEV | Channel SSL Error | **best-effort** — needs a staged TLS misconfig; may defer | CHANNEL.EVENT |
 
 `CHADEV` (channel auto-definition) is represented within the CHLEV family unless it
@@ -128,10 +128,10 @@ bloat this epic.
 
 ```text
 T1 live-lab capture (human-driven)
-   force each event ──► capture RAW amqsevt -o json  ─┐
-                   └──► capture EXACT command sequence ─┤
-                                                        ▼
-        committed reference artifacts (JSON + commands)
+   force each event ──► pull its JSON from journald/Loki (time-windowed)  ─┐
+                   └──► capture EXACT command sequence ─────────────────────┤
+                                                                            ▼
+                    committed reference artifacts (JSON + commands)
                  │                          │
                  ▼                          ▼
         T2 Report A appendix        T3 Report B procedures
@@ -140,6 +140,30 @@ T1 live-lab capture (human-driven)
 T1 is upstream; T2 and T3 are **blocked-by** T1. The capture artifacts are the
 single source of truth both reports draw from — no example or command in either
 report is written by hand where a captured one exists.
+
+**Capture source — syslog/journald, not a second collector.** The lab already
+runs the `#31` produce→JSON→journald/syslog→Loki pipeline, so events land in
+journald as a **non-destructive copy**. T1 therefore does *not* stop the running
+collector or spin up a competing `amqsevt` (which would race the collector's
+destructive queue read). Instead: force one event at a time, note the instant, and
+pull the matching JSON record from journald (`journalctl --since …`) or Loki. This
+is the simplest path and journald's time-range filtering makes per-event
+correlation clean.
+
+**Fidelity guard.** The lab's syslog feed is single-line (`amqsevt -o json_compact`,
+the 9.2.4 single-line format), while `#694`'s file feed is multi-line pretty
+`-o json` — same keys/values, and the reports pretty-print for readability. The
+real risk is **rsyslog's message-size limit truncating a large event** (a fat
+config/command record); a truncated example is worthless. So for any event whose
+syslog record is truncated or mangled, T1 **falls back to a foreground
+`amqsevt -o json` drain for that event only** (collector briefly paused) as the
+authoritative capture. Report A can usefully show **both** real-world capture paths
+(file per `#694`, syslog/journald per the lab).
+
+**Note on file vs syslog.** `#694` documents a *file* sink because the target work
+site declines syslog (hence its file caveats + follow-on burden). The lab itself
+uses syslog/journald, which is also the simpler, non-invasive capture source here —
+the two are not in tension.
 
 **Execution environment.** This epic is *planned* in the local macOS-hosted VM,
 but *implemented* — specifically the T1 live-lab capture — on the **cloud x86
@@ -204,3 +228,9 @@ any Native HA nuances (see §10) are exercised there.
   relevant blocks inlined into the reports, or committed alongside the reports as
   fixtures? (Leaning: inline into the reports; keep bulky raw captures under
   `build/`.)
+- Is the `#31` produce→JSON→journald/syslog→Loki pipeline actually **live on the
+  cloud Native HA capture host**? If not, T1 either enables it first or captures
+  every event via the foreground `amqsevt -o json` drain path.
+- **Syslog fidelity per event:** does each forced event's JSON survive intact in
+  journald (no rsyslog message-size truncation, single-line preserved)? Where it
+  does not, use the foreground-drain fallback for that event.
