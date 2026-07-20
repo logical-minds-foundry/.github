@@ -18,7 +18,7 @@
     *mqlab computes, the build script consumes required args*.
   - the fat-box baking pipeline `lab/boxes/build-fatbox.sh` + per-box `bake-*.yml`
     + the manifest-hash + skip-if-baked guards (#70/#659, #667/#668, epic #88).
-- **Status:** design (brainstorm output 2026-07-20), pending pushback + review
+- **Status:** design (brainstorm output 2026-07-20; pushback-reviewed), pending human review
 - **Date:** 2026-07-20
 
 ## 1. Problem & motivation
@@ -99,16 +99,24 @@ RHEL being x86 is correct; **Ubuntu being forced to x86 is the bug.**
 - **D3 — Un-pin the Ubuntu fat boxes.** The three `obs`/`infra`/`mq-ubuntu2404`
   entries become host-arch-resolved (the #276 base-box pattern); the RHEL fat boxes
   (`mq-rdqm-rhel9`, `mq-nativeha-rhel9`) stay `x86_64`.
-- **D4 — Uniform arch-suffixed cache with migration.** `build/state/boxes/`
-  artifacts become `<box>-<arch>.box` and `<box>-<arch>.manifest-hash` for **all**
-  boxes. A one-time migration renames the existing (x86_64) cache entries; ship it
-  through `mqlab build migrate` so a returning operator's cache is carried forward,
-  not orphaned.
-- **D5 — `box.py`/`box status` become arch-aware.** `BoxSpec` gains an `arch`;
-  `cache_artifact`/manifest-hash/`box status` key on it. On a given host, `box
-  build`/`box status` operate on the host's native arch; the shared cache may also
-  hold the *other* arch's artifact (built on the other host) and must not be
-  clobbered.
+- **D4 — Cache filenames uniform; platform names follow #276.** Two layers, kept
+  distinct:
+  - *Cache artifact filenames* (`build/state/boxes/`) become `<box>-<arch>.box` +
+    `<box>-<arch>.manifest-hash` for **all** boxes (RHEL always `-x86_64`). A
+    one-time migration renames the existing entries via `mqlab build migrate`.
+  - *Platform names* follow the #276 base-box pattern: the **Ubuntu fat boxes**
+    become arch-explicit host-resolved platforms; the **RHEL fat boxes keep their
+    single `mq-*-rhel9` platform name** (only the cache file gains `-x86_64`). RHEL
+    node pins and the `test_*_baked_fat_box` assertions stay unchanged.
+  - The uniformity is real at the cache layer and intentionally asymmetric at the
+    name layer — which is exactly #276, not a new special case.
+- **D5 — The cache is per-host, single-arch in practice.** `build/state/boxes/` is
+  shared only across git worktrees on **one** host (symlinked to main), *not* across
+  the two physical VMs — so a host holds only its own arch's boxes. The arch suffix
+  buys code-uniformity (no "is this forked?" branch) and future-proofing (room for an
+  `-arm64` RHEL sibling), **not** two arches coexisting in a live cache. Migration is
+  therefore per-host and independent — there is no cross-host cache reconciliation.
+  `box.py`/`box status` gain an `arch` on `BoxSpec` and key cache/hash/status on it.
 - **D6 — MQ-media resolves per arch.** The Ubuntu fat boxes acquire/install the
   arch-matching MQ tarball (`UbuntuLinuxARM64` vs `UbuntuLinuxX64`). At bake time
   the install role already derives the suffix from `ansible_architecture` (#276 §7);
@@ -124,6 +132,26 @@ RHEL being x86 is correct; **Ubuntu being forced to x86 is the bug.**
 - **D9 — `pcmk-rhel` is decommissioned, not baked.** It is dropped from Part B and
   its removal is the subject of bookend `#107`. `san-a-rhel` is removed *with* it,
   not in the SAN epic.
+- **D10 — Arch-aware MQ-tarball acquisition (blocking).** A host-resolved Ubuntu fat
+  box has **one name but two arch-variant tarballs**; the box-name-keyed
+  `manifest._ARCH_SUFFIX` cannot express that. The acquisition layer
+  (`ensure_mq_tarballs` → `tarball_name`) pre-stages a tarball into `build/mq/`
+  *before* the bake — so on Apple Silicon it must stage the **host-arch**
+  (`UbuntuLinuxARM64`) tarball, or the arm64 bake finds only the x86_64 one and
+  fails. Resolve the suffix through the same host-facts/`box_build_arch` path the
+  builder uses, so acquisition and bake agree by construction. This is a first-class
+  decision, not an open item — it is the crux of the arm64 half — with a test that
+  arm64 facts stage `UbuntuLinuxARM64` and x86 facts `UbuntuLinuxX64`.
+- **D11 — Refuse emulated RHEL builds on ARM; deprecate, do not remove.** Building a
+  RHEL fat box on an arm64 host is full TCG emulation — impractically slow (the
+  kernel is emulated; the six OSes of the 3+3 HA/DR arm make it unusable). The build
+  **orchestrator refuses loudly** when a RHEL box build is requested on a non-x86
+  host, naming the x86 host as where to build it. The emulated-x86-on-arm path
+  (`build_domain_virt`'s TCG branch, the builder's emulated route) is **deprecated
+  and gated off, not deleted** — a future *standalone, non-HA/DR* RHEL lab (one box,
+  not six) is a plausible reason to re-enable it. The pure resolvers stay
+  display-safe (never raise); the refusal lives in the orchestrator, so `box status`
+  still lists RHEL boxes on ARM (marked x86-only).
 
 ## 4. Scope
 
@@ -149,6 +177,10 @@ The box-build guest arch is a pure function of the box and the host:
 |---|---|---|---|
 | Ubuntu fat box | `mq-ubuntu2404`, `mq-nativeha-ubuntu`, `pcmk-ubuntu` | `facts.arch` (arm64 on Apple Silicon, x86_64 on cloud) | host-resolved, native |
 | RHEL fat box | `mq-rdqm-rhel9`, `mq-nativeha-rhel9` | `x86_64` always | x86-build-only |
+
+On a non-x86 host a RHEL box build is **refused** (D11), not emulated — the pure
+`box_build_arch` still returns `x86_64` (display-safe), but the orchestrator declines
+to run the build.
 
 `box_build_arch` composes with the existing `build_domain_virt` (#327): the arch
 selects the guest `<type arch=…>`/`qemu-system-<arch>`, and — orthogonally — the
@@ -218,11 +250,14 @@ agent on the right host — the "human operates the lab" boundary):
 
 ## 9. Non-goals
 
-- **RHEL native-arm64 / RHEL box building on ARM.** RHEL boxes are x86-build-only;
-  emulated-x86 RHEL baking on Apple Silicon is impractical and unsupported for now.
-  The uniform `<box>-<arch>` namespace (D4) deliberately preserves the option to add
-  an `-arm64` RHEL sibling later with no scheme change — a door left open, not a
-  deliverable.
+- **RHEL box building on ARM — actively refused (D11), not merely unsupported.**
+  Emulated-x86 RHEL on Apple Silicon is impractically slow, so this lab disables it:
+  the builder refuses on a non-x86 host. The supporting code path is **deprecated,
+  not removed** — a future *standalone, non-HA/DR* RHEL lab (a single emulated box
+  rather than today's six) could re-enable it, and the uniform cache namespace (D4) +
+  the deprecated path together keep that door open with no scheme change. RHEL
+  native-arm64 (a genuine arm64 RHEL image) is out of scope entirely — RHEL ships x86
+  only.
 - **The `box.py` CLI verbs** — they stay; only the cache/resolution underneath
   forks by arch.
 - **Reliability hardening of the bake/boot path** — that is the perpetual
@@ -236,6 +271,8 @@ Fail loud, matching the repo idiom (`StepFailedError` / usage-die):
 
 - missing/invalid `--arch` in `build-fatbox.sh` → usage message + non-zero exit,
   before any side effect (#327 D3/D5);
+- a RHEL box build requested on a non-x86 host → hard refusal in the orchestrator
+  (D11), naming the x86 host as where to build it;
 - an arm64 guest requested on an x86 host → hard stop in `platforms` (#276 D4);
 - a stale/absent arch-suffixed cache when a baked box is required → loud, naming the
   `mqlab box`/`build migrate` fix;
@@ -249,7 +286,10 @@ because both native hosts exist:
 - **Unit (blocking).** `box_build_arch` across the matrix (RHEL→x86_64 on both
   hosts; Ubuntu→host arch) with injected `HostFacts`; the `_box_build_steps` argv
   carries `--arch`; `box.py` arch-keyed cache/hash/status; the topology un-pin and
-  the boot tests. Reachable under 100% branch coverage.
+  the boot tests. Plus the **D11 refusal** (RHEL box build on injected arm64 facts →
+  refused, naming the x86 host; on x86 facts → proceeds) and **D10 acquisition**
+  (arm64 facts stage `UbuntuLinuxARM64`, x86 facts `UbuntuLinuxX64`). Reachable under
+  100% branch coverage.
 - **arm64 cold rebuild (blocking, this VM).** A one-shot cold rebuild on Apple
   Silicon bakes and boots the **arm64** `mq-nativeha-ubuntu` + `pcmk-ubuntu` cluster
   nodes natively (no emulation).
@@ -259,15 +299,16 @@ because both native hosts exist:
 
 ## 12. Open items for the implementation plan
 
-- The exact topology shape for host-resolved Ubuntu **fat** boxes (a single
-  host-arch-resolved entry vs. arch-explicit pair) and how a cluster node references
-  it — reconcile with the #276 base-box pattern.
-- The `manifest._ARCH_SUFFIX` arch dimension for fat boxes (box-name-keyed today):
-  make acquisition pick the right Ubuntu tarball per host without a per-arch
-  box-name explosion; audit `scripts/fetch-mq.sh` and `tests/test_manifest.py`.
-- The `mqlab build migrate` step for the cache rename (`<box>.box` →
-  `<box>-x86_64.box`), including what to do with a mixed old/new cache.
-- `box.py` FLEET/`box status` on a host that holds *both* arches in the shared cache
-  (host-native default, other-arch visible-but-not-clobbered).
-- Whether the cluster-node repoint needs a phased-startup or machine-id-reset
-  parallel to #642/#654 for the Ubuntu arms.
+- The precise topology entry for a host-resolved Ubuntu **fat** box (arch-explicit
+  pair vs. single host-resolved entry) and the cluster-node reference — inside the
+  #276 pattern fixed by D4 (Ubuntu arch-explicit, RHEL single-name).
+- The seams to implement **D10** (`ensure_mq_tarballs` / `setup_platforms` /
+  `manifest._ARCH_SUFFIX`) without a per-arch box-name explosion, plus the
+  `scripts/fetch-mq.sh` and `tests/test_manifest.py` audit.
+- The `mqlab build migrate` step for the per-host cache rename (`<box>.box` →
+  `<box>-x86_64.box`), including a mixed old/new cache.
+- The exact **D11** seam — where in the orchestrator (`_box_build_steps` /
+  `_ensure_local_boxes`) the RHEL-on-non-x86 refusal lives, and the deprecation
+  marker on the emulated path.
+- Whether the Ubuntu cluster-node repoint needs a phased-startup or machine-id-reset
+  parallel to #642/#654.
