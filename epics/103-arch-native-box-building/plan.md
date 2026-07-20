@@ -222,6 +222,10 @@ none is exposed, read `lab/topology.yaml` via the existing `paths` helper.)
         if name in present:
             continue
         entry = registry.get(name, {})
+        # DEPRECATED, not removed (#103 D11): emulated cross-arch box builds (e.g. the
+        # RHEL box on Apple Silicon) are refused here. The emulated build path in
+        # build-fatbox.sh + build_domain_virt's TCG branch is retained for a future
+        # standalone non-HA/DR RHEL lab; re-enable by lifting this guard.
         if is_foreign_box_build(entry, facts):
             raise StepFailedError(
                 f"box {name} pins arch {entry['arch']} but this host is {facts.arch}: "
@@ -464,6 +468,10 @@ interpolate `$ARCH`/machine/emulator directly.)
 - Produces: a buildable `mq-nativeha-ubuntu` box (per-arch cache) and `nha-ubuntu-*`
   nodes that boot it; the baked MQ install is skipped on a baked node.
 
+> **Merged ≠ runnable:** this PR repoints to a box that D-arm/D-x86 build later — see
+> the Operational-tasks note. The boot test here is a topology assertion (passes in-PR);
+> a real cold rebuild of the arm requires the per-host deployment first.
+
 - [ ] **Step 1: Write the failing boot test** — add
   `test_nativeha_ubuntu_nodes_boot_the_baked_fat_box` asserting the `nha-ubuntu-*` nodes
   resolve `platform == "mq-nativeha-ubuntu"`. Run → FAIL (nodes still host-resolved base).
@@ -514,6 +522,9 @@ interpolate `$ARCH`/machine/emulator directly.)
 - Consumes: T3/T4/T5 as in T6.
 - Produces: a `pcmk-ubuntu` box and repointed cluster nodes; SAN nodes unchanged.
 
+> **Merged ≠ runnable:** as T6 — the repoint precedes the per-host bake (D-arm/D-x86);
+> the boot test is a topology assertion, not a live boot.
+
 - [ ] **Step 1: Write the failing boot test** — assert `pcmk-a1..3`/`pcmk-b1..3` resolve
   `platform == "pcmk-ubuntu"` **and** `san-a`/`san-b` still resolve to the host-resolved
   base Ubuntu platform. Run → FAIL.
@@ -521,7 +532,11 @@ interpolate `$ARCH`/machine/emulator directly.)
 - [ ] **Step 2: Author `bake-pcmk-ubuntu.yml`** — cluster-node MQ+Pacemaker install body
   only; `--syntax-check`.
 
-- [ ] **Step 3: Add the skip-if-baked guard** to the Pacemaker MQ install tasks.
+- [ ] **Step 3: Confirm (or extend) the skip-if-baked guard** on the pcmk MQ install
+  path. The pcmk cluster nodes install MQ via `roles/mq-install` (`tasks/main.yml`),
+  which **already** carries the `cmqc.h` skip-if-baked guard (#648/#659) *and* the
+  arch-derived tarball — so verify a baked `pcmk-ubuntu` node short-circuits it; add a
+  guard only if the pcmk path routes through a separate install task that lacks one.
 
 - [ ] **Step 4: Register the box** — case-map + `_LOCAL_BOX_BUILDERS` + acquisition
   coverage.
@@ -541,6 +556,16 @@ interpolate `$ARCH`/machine/emulator directly.)
 
 Seeded at task-filing time (step 9 of epic-create) with `--blocked-by` the impl tasks.
 Each carries a **platform** the human routes to the agent on that host.
+
+> **Merged ≠ runnable (dual-arch consequence).** Merging T6/T7 repoints the
+> `nha-ubuntu`/`pcmk` cluster nodes to boxes that **do not exist until these
+> deployments run** — so a fresh cold rebuild of those arms fails on `develop` until
+> **D-arm** (arm64) *and* **D-x86** (x86) have each baked+cached on their host. This is
+> the framework's merged-vs-deployed model (a deployment's closure *is* the "usable"
+> signal); the `Blocked-by` edges (T6/T7 → D-arm/D-x86 → V-arm/V-x86) sequence it, and
+> `epic-implement` will not surface a validation as runnable until its deployment closes.
+> Unlike the x86-only #88 (one task repointed *and* proved boot), the two-host bake here
+> is intrinsically operational and split.
 
 - **D-arm — Deployment (arm64-native, Apple Silicon).** Run `mqlab build migrate` on
   the Mac (rename its x86 cache — no-op if none), then bake + cache the **arm64**
