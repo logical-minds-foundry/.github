@@ -49,11 +49,16 @@ follow-on is quietly lost.
 - **Ride the existing pattern.** Every QM-creation role already
   `include_role: mq-diag-logging` (the `#282` JSON-diagnostics + journald drop-in).
   Event monitoring rides that same seam — one more shared cross-cutting include.
-- **Configuration travels with the queue manager.** The collector is an MQ SERVICE
-  with `CONTROL(QMGR)`, so it is part of the QM's object definitions and starts,
-  stops, and fails over **with** the QM — across HA failover and DR/CRR cutover
-  alike. Defining it once per logical QM is sufficient; site-B/DR needs no separate
-  handling.
+- **The SERVICE object travels; the wrapper file does not.** The collector is an MQ
+  SERVICE with `CONTROL(QMGR)`, so it is part of the QM's object definitions and
+  starts, stops, and fails over **with** the QM — across HA failover and DR/CRR
+  cutover alike. Defining it once per logical QM is sufficient; site-B/DR needs no
+  separate handling. **But** the SERVICE's `STARTCMD` runs a host-local `run.sh`
+  wrapper, which is **not** part of the QM and does **not** replicate — so the
+  wrapper must be installed on **every node the QM can activate on**, or the
+  collector fails to start after a failover. This asymmetry — object once on the
+  active node, wrapper on every node — is the structural driver of the role's two
+  entry points (§3.1).
 - **No bespoke code, no new plumbing.** Everything is MQSC + an existing role. The
   journald drop-in, alloy, and `amqsevt` are already present on every arm node.
 
@@ -61,14 +66,24 @@ follow-on is quietly lost.
 
 A single generic mechanism plus its wiring into every QM-creation path:
 
-### 3.1 Consolidated `mq-event-monitor` role
+### 3.1 Consolidated `mq-event-monitor` role, two entry points
 
 Extend the existing `mq-event-monitor` role (today: define + start the collector
 SERVICE, `#515`) to **also** enable the event classes (`#514`:
-`ALTER QMGR …EV(ENABLED)` and the per-queue performance-event step). The role
-becomes the one self-contained unit of "event monitoring on this QM": assert its
-preconditions (amqsevt present, journald drop-in present), enable the classes,
-define + start the SERVICE.
+`ALTER QMGR …EV(ENABLED)` and the per-queue performance-event step), and split it
+into two entry points along the object-vs-file asymmetry of §2:
+
+- **Host-prep (`main`)** — assert preconditions (amqsevt present, journald drop-in
+  present) and install the `run.sh` wrapper. Runs on **every** node the QM can
+  activate on.
+- **MQSC (`service`)** — enable the event classes, set per-queue performance events,
+  define + start the SERVICE. Runs **once, on the active instance**; the objects
+  replicate and travel.
+
+This mirrors the split `mq-diag-logging` already uses (`tasks_from: system` on all
+nodes vs `tasks_from: qmini` per-QM). A standalone QM (SVCQM) includes both halves
+on its one host; an HA arm includes host-prep on every node and the MQSC half on
+the active node.
 
 ### 3.2 Wiring into every QM-creation path, `mq-qmgr` de-duplicated
 
@@ -103,11 +118,13 @@ the tag to `unit="mq-events"` and ships it to Loki on obs; Grafana reads it. Thi
 epic changes **only which QMs run that configuration** — from one to all — by
 factoring the enable + define into the shared role and including it everywhere.
 
-**Where the MQSC runs.** The enable and SERVICE-define are QM-level operations, so
-each include must run against the node where the QM is live: the active Native HA
-instance, the Pacemaker resource owner, or `when: rdqm_is_active`. Each seam already
-carries that gating for its other QM-level includes, so the role rides it rather
-than inventing new host-selection logic.
+**Where each half runs.** The **host-prep** half (wrapper + asserts) runs on every
+node in the arm's group, alongside the arm's other per-node prep (it rides the same
+place `mq-diag-logging` is included). The **MQSC** half (enable + SERVICE-define) is
+a QM-level operation, so it runs once against the node where the QM is live: the
+active Native HA instance, the Pacemaker resource owner, or `when: rdqm_is_active`.
+Each seam already carries that active-node gating for its other QM-level includes, so
+the role rides it rather than inventing new host-selection logic.
 
 ## 6. Component boundaries & isolation
 
