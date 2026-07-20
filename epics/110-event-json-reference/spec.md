@@ -83,9 +83,14 @@ Two reports in `mq-resiliency-lab-for-linux/docs/reports/`, both companions to t
 - **Consuming guidance:** how to read `eventType`/`eventReason` name+value pairs,
   how to find a field's meaning (map camelCase key → PCF constant → Event message
   description), and defensive parsing (key by name, tolerate absence).
-- **Appendix — one section per captured event:** the real JSON block, an annotated
-  key-value table (JSON key → PCF constant → meaning), the event queue it came
-  from, and the reason code.
+- **Finding — "do events fit in syslog?":** a per-event size/fidelity table (event
+  → JSON byte size → binding transport limit → fit/truncated) and, if any event
+  overflows, a prominent call-out that the lab's `#31` syslog-based pipeline loses
+  data for that event class, with the remediation options (raise rsyslog
+  `$MaxMessageSize`, route via journald's larger `LineMax`, or the file sink).
+- **Appendix — one section per captured event:** the real (authoritative,
+  complete) JSON block, an annotated key-value table (JSON key → PCF constant →
+  meaning), the event queue it came from, and the reason code.
 
 ### 3.2 Report B — deterministic event-generation lab reference
 
@@ -128,42 +133,53 @@ bloat this epic.
 
 ```text
 T1 live-lab capture (human-driven)
-   force each event ──► pull its JSON from journald/Loki (time-windowed)  ─┐
-                   └──► capture EXACT command sequence ─────────────────────┤
-                                                                            ▼
-                    committed reference artifacts (JSON + commands)
-                 │                          │
-                 ▼                          ▼
-        T2 Report A appendix        T3 Report B procedures
+   force each event ─┬─► AUTHORITATIVE JSON via amqsevt (browse/drain) ──┐
+                     ├─► syslog/journald copy ─► compare ─► size & fit?  ─┤
+                     └─► EXACT command sequence ────────────────────────── ┤
+                                                                           ▼
+        committed artifacts: JSON examples + syslog-fidelity table + commands
+                 │                        │                       │
+                 ▼                        ▼                       ▼
+        T2 Report A appendix    Report A "fits in syslog?"   T3 Report B
+                                       finding                 procedures
 ```
 
 T1 is upstream; T2 and T3 are **blocked-by** T1. The capture artifacts are the
 single source of truth both reports draw from — no example or command in either
 report is written by hand where a captured one exists.
 
-**Capture source — syslog/journald, not a second collector.** The lab already
-runs the `#31` produce→JSON→journald/syslog→Loki pipeline, so events land in
-journald as a **non-destructive copy**. T1 therefore does *not* stop the running
-collector or spin up a competing `amqsevt` (which would race the collector's
-destructive queue read). Instead: force one event at a time, note the instant, and
-pull the matching JSON record from journald (`journalctl --since …`) or Loki. This
-is the simplest path and journald's time-range filtering makes per-event
-correlation clean.
+**Capture — authoritative from `amqsevt`; syslog measured against it.** The
+reference examples must be **complete and parseable**, so their authoritative
+source is a direct `amqsevt` read of each event — a non-destructive
+`amqsevt -b -o json` browse, or a foreground drain with the `#31` collector briefly
+paused. `amqsevt` formats the full PCF, so this copy is ground truth **by
+construction**. T1 does *not* trust the syslog line as the example source, because
+syslog is exactly what may corrupt it.
 
-**Fidelity guard.** The lab's syslog feed is single-line (`amqsevt -o json_compact`,
-the 9.2.4 single-line format), while `#694`'s file feed is multi-line pretty
-`-o json` — same keys/values, and the reports pretty-print for readability. The
-real risk is **rsyslog's message-size limit truncating a large event** (a fat
-config/command record); a truncated example is worthless. So for any event whose
-syslog record is truncated or mangled, T1 **falls back to a foreground
-`amqsevt -o json` drain for that event only** (collector briefly paused) as the
-authoritative capture. Report A can usefully show **both** real-world capture paths
-(file per `#694`, syslog/journald per the lab).
+**Syslog fidelity is a first-class, per-event finding.** In the same pass T1
+captures what the lab's `#31` journald/syslog→Loki pipeline actually delivered for
+each event and **compares it to the authoritative `amqsevt` copy**, recording the
+JSON **byte size**, the **binding transport limit on the lab's actual path**, and
+whether the event **fit or was truncated**. This answers a question the design
+surfaced and that had simply been *assumed*: **do all these events fit in syslog?**
+
+Why it matters beyond the reports: the `#31` event pipeline **is** syslog-based, so
+any event that overflows the binding limit is **silently losing data and producing
+unparseable JSON in the production-shaped path** — a higher-order architecture
+finding, not a capture nuisance, and another entry in `#694`'s file-vs-syslog
+trade-off. Binding limits to check against the lab's real path (**verify, do not
+assume**): rsyslog `$MaxMessageSize` default **8 KB**; systemd-journald `LineMax`
+default **~48 KB**; Loki its own per-line cap. 8 KB is small enough that a fat
+config or command event could plausibly exceed it.
 
 **Note on file vs syslog.** `#694` documents a *file* sink because the target work
-site declines syslog (hence its file caveats + follow-on burden). The lab itself
-uses syslog/journald, which is also the simpler, non-invasive capture source here —
-the two are not in tension.
+site declines syslog (hence its file caveats + follow-on burden); the lab uses
+syslog/journald. The two are not in tension for capture — but a **confirmed
+truncation finding is routed back to `#31` as its own issue** (and strengthens the
+file-vs-syslog framing in `#694`). Report A also notes the format difference: the
+lab feed is single-line (`amqsevt -o json_compact`, the 9.2.4 single-line format);
+`#694`'s file feed is multi-line pretty `-o json`; same keys/values, and the
+reports pretty-print for readability.
 
 **Execution environment.** This epic is *planned* in the local macOS-hosted VM,
 but *implemented* — specifically the T1 live-lab capture — on the **cloud x86
@@ -202,7 +218,12 @@ any Native HA nuances (see §10) are exercised there.
 - Report A carries the full analysis with **verifiable, pinned (9.4) references**
   separating data (what IBM/Taylor state) from judgment (the derivation rule).
 - Report A's appendix has one section per **successfully captured** event, each
-  showing **real** JSON + an annotated key→PCF→meaning table.
+  showing **real, authoritative (complete, parseable)** JSON — sourced from the
+  direct `amqsevt` read, never from a possibly-truncated syslog line — plus an
+  annotated key→PCF→meaning table.
+- **Every event is size-checked against syslog:** Report A carries the per-event
+  fit/truncated table, and any truncation is called out as a `#31`-pipeline finding
+  and filed as its own issue.
 - Report B reproduces each captured event deterministically: preconditions,
   commands, expected `eventType`/reason, cleanup — sufficient for a human to
   regenerate it without the AI.
@@ -231,6 +252,9 @@ any Native HA nuances (see §10) are exercised there.
 - Is the `#31` produce→JSON→journald/syslog→Loki pipeline actually **live on the
   cloud Native HA capture host**? If not, T1 either enables it first or captures
   every event via the foreground `amqsevt -o json` drain path.
-- **Syslog fidelity per event:** does each forced event's JSON survive intact in
-  journald (no rsyslog message-size truncation, single-line preserved)? Where it
-  does not, use the foreground-drain fallback for that event.
+- **Syslog fidelity per event** — a required investigation, not just a fallback
+  trigger (see §5): measure each event's JSON byte size against the binding
+  transport limit on the lab's actual path and record fit/truncated. A confirmed
+  overflow is a real `#31`-pipeline data-loss finding → file it as its own issue
+  and reflect it in `#694`'s file-vs-syslog trade-off. (The authoritative examples
+  come from `amqsevt` regardless, so the reports are never blocked by truncation.)
