@@ -128,7 +128,7 @@ vrg-git add docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md docs/
 vrg-commit --type docs --scope events \
   --message "characterization research (amqsevt exit/handle behaviour, 2042 reap timing) for the resilient wrapper (.github#122)" \
   --body "A0 MQ spawn topology + setsid decision; A1 amqsevt open mode (source + live OPENOPTS); A2 signal/exit + handle behaviour; A3 2042 reap-window lit review + measurement. Findings gate the wrapper design. Refs .github#122."
-vrg-pr-workflow report-ready --issue <T1_ISSUE> --title "docs(events): amqsevt behaviour + 2042 reap-timing research for the resilient wrapper (.github#122)" --summary "Characterise amqsevt exit/handle behaviour under signals, its event-queue open mode, MQ's SERVICE spawn topology (setsid viability), and the queue-manager stale-handle reap window; captured as evidence in the internal report." --notes "Gates T2: A0 fixes setsid-vs-Python, A1 branches the 2042 work, A3 sets the sleep/retry bound. amqsevt.c staged in the shared build tree."
+vrg-pr-workflow report-ready --issue 760 --title "docs(events): amqsevt behaviour + 2042 reap-timing research for the resilient wrapper (.github#122)" --summary "Characterise amqsevt exit/handle behaviour under signals, its event-queue open mode, MQ's SERVICE spawn topology (setsid viability), and the queue-manager stale-handle reap window; captured as evidence in the internal report." --notes "Gates T2: A0 fixes setsid-vs-Python, A1 branches the 2042 work, A3 sets the sleep/retry bound. amqsevt.c staged in the shared build tree."
 ```
 
 ---
@@ -248,7 +248,7 @@ vrg-git add ansible/roles/mq-event-monitor/templates/run.sh.j2 ansible/roles/mq-
 vrg-commit --type feat --scope events \
   --message "self-healing amqsevt wrapper: setsid supervision loop + process-group STOPCMD (.github#122)" \
   --body "run.sh becomes a crash-restart loop launched under 'setsid -w --' so it leads its own process group; SERVICE STOPCMD sends 'kill -TERM -MQ_SERVER_PID' to reap wrapper+amqsevt together. Bounded open-retry on a stuck 2042, then loud exit. Refs .github#122."
-vrg-pr-workflow report-ready --issue <T2_ISSUE> --title "feat(events): self-healing amqsevt event-monitor wrapper (.github#122)" --summary "Replace the exec-amqsevt launcher with a setsid-led supervision loop that restarts amqsevt on crash and dies cleanly on a process-group STOPCMD, preserving the clean-stop guarantee." --notes "Live-smoked on SVCQM: PGID identity holds, STOP SERVICE reaps both processes with no orphan. Blocked-by T1; escalates to the Python fallback only if the checkpoint fails."
+vrg-pr-workflow report-ready --issue 761 --title "feat(events): self-healing amqsevt event-monitor wrapper (.github#122)" --summary "Replace the exec-amqsevt launcher with a setsid-led supervision loop that restarts amqsevt on crash and dies cleanly on a process-group STOPCMD, preserving the clean-stop guarantee." --notes "Live-smoked on SVCQM: PGID identity holds, STOP SERVICE reaps both processes with no orphan. Blocked-by T1; escalates to the Python fallback only if the checkpoint fails."
 ```
 
 ---
@@ -293,7 +293,7 @@ vrg-git add tools/validate-event-monitor-wrapper.sh docs/reference/event-monitor
 vrg-commit --type docs --scope events \
   --message "validation runbook + evidence harness for the resilient event-monitor wrapper (.github#122)" \
   --body "Repeatable B-matrix procedure (runbook) and an agent-runnable harness that induces normal-start / clean-stop / crash-recovery (+2042 if exclusive) and captures evidence into the report assets. Refs .github#122."
-vrg-pr-workflow report-ready --issue <T3_ISSUE> --title "docs(events): validation runbook + evidence harness for the wrapper (.github#122)" --summary "Add a repeatable B-matrix runbook and a Bash harness an AI lab agent can run to induce and capture normal-start, clean-stop, and crash-recovery (plus 2042 for exclusive-open) evidence." --notes "Blocked-by T2. Consumed by the Task 4 live validation run."
+vrg-pr-workflow report-ready --issue 762 --title "docs(events): validation runbook + evidence harness for the wrapper (.github#122)" --summary "Add a repeatable B-matrix runbook and a Bash harness an AI lab agent can run to induce and capture normal-start, clean-stop, and crash-recovery (plus 2042 for exclusive-open) evidence." --notes "Blocked-by T2. Consumed by the Task 4 live validation run."
 ```
 
 ---
@@ -338,7 +338,7 @@ vrg-pr-workflow report-ready --issue <T3_ISSUE> --title "docs(events): validatio
 - Live B-matrix evidence + internal report (spec §6, §7, §10) → Task 3 (scaffold) + Task 5 (run/finalize). ✅
 - Failover out of scope (spec §6, §11) → no task. ✅
 
-**Placeholder scan:** the only literal placeholders are `<T1_ISSUE>`…`<T3_ISSUE>` in `report-ready` (implementation task numbers, filed after this plan lands — resolved at execution) and the report date `2026-07-21` (set to the actual run date). No TBD/TODO/"handle errors". T3 Step 1 describes the harness by its exact required behaviours + I/O contract rather than a full script body, because the concrete `ps`/`runmqsc`/`kill` calls it wires together are already given verbatim in T1 and T2 — it is assembly of proven commands, not new logic. ✅
+**Placeholder scan:** `report-ready` carries the real task numbers (T1 #760, T2 #761, T3 #762; T4 #763 deployment, T5 #764 validation are operational, run via `issue-deploy`/`issue-validate`); the only soft value is the report date `2026-07-21` (set to the actual run date). No TBD/TODO/"handle errors". T3 Step 1 describes the harness by its exact required behaviours + I/O contract rather than a full script body, because the concrete `ps`/`runmqsc`/`kill` calls it wires together are already given verbatim in T1 and T2 — it is assembly of proven commands, not new logic. ✅
 
 **Consistency:** role vars named identically to the existing role (`mq_event_amqsevt_bin`, `mq_event_syslog_tag`, `mq_event_logger_max_size`, `mq_event_run_dir`, `mq_event_service_name`) plus the two new defaults (`mq_event_sleep_secs`, `mq_event_open_retry_secs`) used verbatim in `run.sh.j2`; the harness/report evidence dir `docs/reports/assets/mq-event-monitor-wrapper/` is one path throughout; `SVCQM`/`svc` is the single worked example across T1/T2/T4. ✅
 
