@@ -4,7 +4,7 @@
 
 **Goal:** Make the MQ event-monitor SERVICE self-heal across `amqsevt` crashes without losing the clean-stop guarantee, and prove both behaviours with captured lab evidence in an internal report.
 
-**Architecture:** Replace the current `exec amqsevt` launcher (`ansible/roles/mq-event-monitor/templates/run.sh.j2:29`) with a minimal bash supervision loop launched under `setsid -w --` so the wrapper is its own process-group leader; change the SERVICE stop to a process-group kill (`STOPARG('-TERM -MQ_SERVER_PID')`) so a QM stop reaps both the wrapper and `amqsevt`, while an `amqsevt` crash leaves the wrapper alive to log-sleep-restart. A research phase first characterises MQ's spawn topology, the `amqsevt` source, and the queue-manager stale-handle reap window, so the mechanism is proven rather than assumed; a Python fallback is documented if the process-group identity does not hold.
+**Architecture:** Replace the current `exec amqsevt` launcher (`ansible/roles/mq-event-monitor/templates/run.sh.j2:29`) with a minimal bash supervision loop launched under `setsid -w --` so the wrapper is its own process-group leader; change the SERVICE stop to a process-group kill (`STOPARG('-TERM -- -+MQ_SERVER_PID+')`) so a QM stop reaps both the wrapper and `amqsevt`, while an `amqsevt` crash leaves the wrapper alive to log-sleep-restart. A research phase first characterises MQ's spawn topology, the `amqsevt` source, and the queue-manager stale-handle reap window, so the mechanism is proven rather than assumed; a Python fallback is documented if the process-group identity does not hold.
 
 **Tech Stack:** Bash + util-linux `setsid`, IBM MQ 9.4 (`amqsevt` SERVICE, `runmqsc` `DISPLAY QSTATUS TYPE(HANDLE)`), systemd journald + `logger -t mq-events`, Ansible for provisioning, the existing alloy→Loki→Grafana pipeline. Validation: `vrg-container-run -- vrg-validate` + live-lab evidence capture.
 
@@ -167,8 +167,8 @@ Replace the whole body of `ansible/roles/mq-event-monitor/templates/run.sh.j2` (
 #!/bin/bash
 # MQ event collector launcher (.github#122, epic .github#31). Started by the queue manager as
 # an MQ SERVICE object (CONTROL(QMGR)) via `setsid -w -- run.sh <QM>`, so run.sh is its own
-# process-group leader (PGID == PID). The SERVICE STOPCMD sends `kill -TERM -MQ_SERVER_PID`
-# (negative PID => whole group), reaping BOTH this wrapper and amqsevt. On a group SIGTERM the
+# process-group leader (PGID == PID). The SERVICE STOPARG `-TERM -- -+MQ_SERVER_PID+` expands
+# to `kill -TERM -- -<pid>` (negative PID => whole group), reaping BOTH this wrapper and amqsevt. On a group SIGTERM the
 # wrapper terminates by default disposition (no trap) and does NOT restart. When amqsevt exits
 # on its own (crash), the wrapper is still alive: it logs, sleeps, and re-runs — the resilience
 # an MQ SERVICE object does not provide itself. See epics/122-event-monitor-wrapper/spec.md.
@@ -212,7 +212,7 @@ Note: the `open_deadline` only advances on consecutive failures and resets after
 In `ansible/roles/mq-event-monitor/tasks/service.yml`, change the `define + start` task's `printf` so `STARTCMD` wraps `run.sh` in `setsid -w --` and `STOPCMD`/`STOPARG` target the process group. Replace the `DEFINE SERVICE(...)` line's `STARTCMD`/`STOPCMD`/`STOPARG` clauses:
 
 ```yaml
-    printf "DEFINE SERVICE(%s) REPLACE CONTROL(QMGR) SERVTYPE(SERVER) STARTCMD('/usr/bin/setsid') STARTARG('-w -- %s/run.sh %s') STOPCMD('/bin/kill') STOPARG('-TERM -MQ_SERVER_PID') DESCR('Drain SYSTEM.ADMIN.*.EVENT to JSON on journald (mq-events); self-healing wrapper (.github#122)')\nSTART SERVICE(%s)\n" \
+    printf "DEFINE SERVICE(%s) REPLACE CONTROL(QMGR) SERVTYPE(SERVER) STARTCMD('/usr/bin/setsid') STARTARG('-w -- %s/run.sh %s') STOPCMD('/bin/kill') STOPARG('-TERM -- -+MQ_SERVER_PID+') DESCR('Drain SYSTEM.ADMIN.*.EVENT to JSON on journald (mq-events); self-healing wrapper (.github#122)')\nSTART SERVICE(%s)\n" \
       "{{ mq_event_service_name }}" "{{ mq_event_run_dir }}" "{{ qmgr_name }}" "{{ mq_event_service_name }}" \
 ```
 
@@ -247,7 +247,7 @@ Expected: with the SERVICE running, `run.sh` and `amqsevt` share one PGID equal 
 vrg-git add ansible/roles/mq-event-monitor/templates/run.sh.j2 ansible/roles/mq-event-monitor/tasks/service.yml ansible/roles/mq-event-monitor/defaults/main.yml
 vrg-commit --type feat --scope events \
   --message "self-healing amqsevt wrapper: setsid supervision loop + process-group STOPCMD (.github#122)" \
-  --body "run.sh becomes a crash-restart loop launched under 'setsid -w --' so it leads its own process group; SERVICE STOPCMD sends 'kill -TERM -MQ_SERVER_PID' to reap wrapper+amqsevt together. Bounded open-retry on a stuck 2042, then loud exit. Refs .github#122."
+  --body "run.sh becomes a crash-restart loop launched under 'setsid -w --' so it leads its own process group; SERVICE STOPARG '-TERM -- -+MQ_SERVER_PID+' expands to 'kill -TERM -- -<pid>' to reap wrapper+amqsevt together. Bounded open-retry on a stuck 2042, then loud exit. Refs .github#122."
 vrg-pr-workflow report-ready --issue 761 --title "feat(events): self-healing amqsevt event-monitor wrapper (.github#122)" --summary "Replace the exec-amqsevt launcher with a setsid-led supervision loop that restarts amqsevt on crash and dies cleanly on a process-group STOPCMD, preserving the clean-stop guarantee." --notes "Live-smoked on SVCQM: PGID identity holds, STOP SERVICE reaps both processes with no orphan. Blocked-by T1; escalates to the Python fallback only if the checkpoint fails."
 ```
 
