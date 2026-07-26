@@ -7,6 +7,16 @@
 - **Status:** design (brainstorm output), pending review
 - **Date:** 2026-07-06
 
+> **Shipped (epic `#114`).** This landed as a **de-facto standard configured on
+> every queue manager**, not a single-QM proof of concept — applied via the shared
+> **`mq-event-monitor` Ansible role** across all four HA/DR arms (`pcmk-ubuntu`,
+> `rdqm-rhel`, `nativeha-rhel`, `nativeha-ubuntu`) **plus the shared `SVCQM`
+> counterparty**. Two design details changed in the build and are corrected below:
+> the collector emits **`amqsevt -o json_compact`** (JSONL — one JSON object per
+> line) through **`logger --size 32768 -t mq-events`**, and **`LOGGEREV` is not
+> enabled** (see §5.1). The pipeline is unchanged: journald (`mq-events`) → Alloy →
+> Loki → Grafana.
+
 ## 1. Problem & motivation
 
 The lab has **no instrumentation-event logging today**. IBM MQ continuously
@@ -70,9 +80,9 @@ consuming them on dashboards — each its own PR.
   │                                                 │
   │  DEFINE SERVICE(MQ.EVENT.MONITOR)               │
   │    CONTROL(QMGR)  SERVTYPE(SERVER)              ▼
-  │    amqsevt -o json  ─ destructive drain ─▶ (reads & removes events)
+  │    amqsevt -o json_compact ─ destructive drain ─▶ (reads & removes events)
   │              │                                 │
-  │              └── stdout | logger -t mq-events ─┘
+  │              └── stdout | logger --size 32768 -t mq-events ─┘
   └────────────────────────┼───────────────────────┘
                            ▼
                    journald (tag: mq-events)      ← beside MQ core logs (ibm-mq)
@@ -114,10 +124,11 @@ already lives (the `mq-qmgr` role and the per-arm site playbooks), so it is
 
 ### 5.1 Event gate — enable everything to start
 
-`ALTER QMGR` enables **all** instrumentation-event classes. Starting broad is
-deliberate: show the full range first, then pare back once real volume is known
-(volume is expected to be modest — the lab does not run the workload that would
-generate high event rates).
+`ALTER QMGR` enables **every applicable** instrumentation-event class (the 11 in
+the table below; `LOGGEREV` is deliberately omitted — see the note after the
+table). Starting broad is deliberate: show the full range first, then pare back
+once real volume is known (volume is expected to be modest — the lab does not run
+the workload that would generate high event rates).
 
 | QMGR attribute | Class | Notes |
 |---|---|---|
@@ -125,7 +136,6 @@ generate high event rates).
 | `CHADEV(ENABLED)`    | Channel auto-def | Auto-definition of receiver/server-connection channels |
 | `CHLEV(ENABLED)`     | Channel | Start/stop/error — highest value during failover/reconnect drills |
 | `STRSTPEV(ENABLED)`  | Start/stop | QM start/stop — narrates HA/DR cutovers |
-| `LOGGEREV(ENABLED)`  | Logger | Recovery-log events — ties to the storage/replication story |
 | `PERFMEV(ENABLED)`   | Performance | Queue depth high/full, service interval — **also needs per-queue thresholds, see below** |
 | `CONFIGEV(ENABLED)`  | Config | Object create/alter/delete audit — chatty, kept for the demo |
 | `CMDEV(NODISPLAY)`   | Command | **`NODISPLAY`, not `ENABLED`** — see §5.2 |
@@ -139,6 +149,14 @@ generate high event rates).
 > events) is **z/OS-only** (footnote 2, "Valid only on z/OS") and is deliberately
 > excluded — issuing it on a Linux QM would make `runmqsc` reject the whole `ALTER`.
 > There is **no `COMMEV`** attribute; earlier drafts listed one in error.
+
+> **`LOGGEREV` excluded (build correction).** `LOGGEREV(ENABLED)` is valid only on
+> **linear-logging** queue managers; the lab's QMs use **circular** logging, where
+> MQ rejects it with **`AMQ8518E`**. Because `ALTER QMGR` is atomic, that one
+> rejected attribute aborts the **entire** enable statement — so no event class
+> gets enabled at all. `LOGGEREV` is therefore dropped and the gate enables the
+> **11** classes above. (An earlier draft's "recovery-log events" row is gone with
+> it.)
 
 **Performance events** additionally require **per-queue** thresholds to fire:
 set `QDPMAXEV(ENABLED)` / `QDPHIEV(ENABLED)` (and, where wanted, `QDPLOEV`,
@@ -176,11 +194,19 @@ DEFINE SERVICE(MQ.EVENT.MONITOR) REPLACE +
   DESCR('Drain SYSTEM.ADMIN.*.EVENT to JSON on journald')
 ```
 
-where the role-templated `run.sh` is essentially:
+where the role-templated `run.sh` is essentially (shipped form):
 
 ```sh
 #!/bin/sh
-exec /opt/mqm/samp/bin/amqsevt -m "$1" -o json | logger -t mq-events
+# -o json_compact → one JSON object per line (JSONL), so logger maps one event to
+#   one journald entry. (IBM documents `json` but not `json_compact` for 9.4 — the
+#   mode is real but IBM-undocumented.)
+# logger --size 32768 → avoid logger's RFC 3164 ~1 KiB default, which would SPLIT a
+#   longer event line into multiple journald entries and break `| json` parsing.
+# stdbuf -oL + process substitution (not a naive `| logger`) → the QM tracks
+#   amqsevt directly, so STOPCMD terminates the collector cleanly on QM shutdown.
+exec stdbuf -oL /opt/mqm/samp/bin/amqsevt -m "$1" -o json_compact \
+  > >(exec logger --size 32768 -t mq-events)
 ```
 
 Key properties:
@@ -201,9 +227,10 @@ Key properties:
 - **`STOPCMD`/`STOPARG`** — on QM shutdown, MQ terminates the service via its
   server-PID token so the collector (and its `logger` pipe) exits cleanly.
 
-> **Build-time verifications.** (1) `amqsevt`/`logger` output buffering: confirm
-> events reach journald promptly under a pipe (line-buffered); if stdio
-> block-buffers, wrap the `amqsevt` invocation in `run.sh` with `stdbuf -oL`.
+> **Build-time verifications.** (1) `amqsevt`/`logger` output buffering — **resolved
+> in the build:** `run.sh` wraps the `amqsevt` invocation in `stdbuf -oL` so events
+> reach journald promptly, and uses `-o json_compact` + `logger --size 32768` so
+> each event is one un-split journald entry.
 > (2) Confirm exact MQSC `SERVICE` `STOPARG` token for the server PID against
 > IBM Docs 9.4. (3) Confirm the service's `amqsevt` picks up the standard default
 > event-queue set (or list queues explicitly with `-q`). (4) **Verify actual
@@ -215,7 +242,8 @@ Key properties:
 
 ### 5.4 Output to journald via `logger`
 
-The service pipes `amqsevt` JSON through `logger -t mq-events`, so events land in
+The service sends `amqsevt` JSONL (`-o json_compact`) through
+`logger --size 32768 -t mq-events`, so events land in
 **journald tagged `mq-events`** — right next to the MQ core diagnostic logs,
 which arrive tagged `ibm-mq` (via MQ's native Syslog service, `mq-diag-logging`).
 One sink, two identifiers. This matches the intended "events in the same place as
@@ -286,11 +314,12 @@ internals.
 
 ## 9. Implementation tasks (preview; finalized in the plan)
 
-1. **MQSC event gate** — enable all classes + `CMDEV(NODISPLAY)` + per-queue perf
-   thresholds, across all arms; cold-rebuild verified.
+1. **MQSC event gate** — enable the 11 event classes (`LOGGEREV` excluded) +
+   `CMDEV(NODISPLAY)` + per-queue perf thresholds, on **every** QM across all four
+   arms plus `SVCQM`; cold-rebuild verified.
 2. **Collector `SERVICE`** — the `DEFINE SERVICE` + role-shipped `run.sh` wrapper
-   (`amqsevt … | logger`) wiring (new `mq-event-monitor` role or folded into
-   `mq-qmgr`); verify it travels across a failover, per arm.
+   (`amqsevt -o json_compact … logger --size 32768`) wiring (shipped as the shared
+   `mq-event-monitor` role); verify it travels across a failover, per arm.
 3. **Pipeline label + verify** — Alloy relabel for `mq-events`; prove event JSON
    reaches Loki queryable by its fields.
 4. **Dashboards** — dedicated events feed + per-object (queue/channel) event
@@ -302,11 +331,12 @@ brainstorm (`#33`), and the docs-review gate (`#34`).
 
 ## 10. Acceptance criteria
 
-- [ ] Instrumentation events are enabled on the lab QMs **declaratively** (MQSC
-      in the qmgr role/create block), surviving a cold rebuild.
-- [ ] An `amqsevt -o json` collector runs as an **MQ `SERVICE` object**
+- [ ] Instrumentation events are enabled on **every** lab QM **declaratively**
+      (MQSC via the shared `mq-event-monitor` role), surviving a cold rebuild.
+- [ ] An `amqsevt -o json_compact` collector runs as an **MQ `SERVICE` object**
       (`CONTROL(QMGR)`) that **travels with the QM across a failover**, draining
-      events **destructively** and emitting JSON to journald tagged `mq-events`.
+      events **destructively** and emitting JSONL to journald tagged `mq-events`
+      via `logger --size 32768`.
 - [ ] Event JSON reaches Loki as the `{unit="mq-events"}` stream and is
       **queryable by its JSON fields** (`eventType`, `eventReason`, source QM,
       object name).
@@ -337,8 +367,8 @@ brainstorm (`#33`), and the docs-review gate (`#34`).
 - Exact `amqsevt` path and the default event-queue set — confirm against IBM
   Docs 9.4 (§4, §5.3).
 - `SERVICE` `STOPARG` server-PID token syntax — confirm against IBM Docs 9.4.
-- Output buffering under the `logger` pipe — verify prompt delivery; `stdbuf -oL`
-  if needed (§5.3).
+- Output buffering under the `logger` pipe — **resolved:** `run.sh` ships with
+  `stdbuf -oL` plus `-o json_compact` and `logger --size 32768` (§5.3).
 - Which queues get `QDPMAXEV`/`QDPHIEV` thresholds (which app queues are worth
   performance events) — decide during the gate task.
 - Event volume once everything is enabled — measure, then pare back the class set
