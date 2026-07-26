@@ -77,9 +77,12 @@ with real, captured lab evidence in an internal engineering report.
   QM-tracked process alive for the service's lifetime in the edge case below.
 - The SERVICE definition changes its stop from targeting a single PID to targeting
   the **whole process group**:
-  `STOPCMD('/bin/kill') STOPARG('-TERM -MQ_SERVER_PID')`. The **negative PID** is
-  the classic Unix idiom: `kill -TERM -<pgid>` signals every process in the group —
-  both the wrapper *and* the `amqsevt` child — in one call.
+  `STOPCMD('/bin/kill') STOPARG('-TERM -- -+MQ_SERVER_PID+')`. The `+MQ_SERVER_PID+`
+  insert **must** carry the `+` delimiters — MQ substitutes it (even embedded in a
+  larger argument) only when delimited; the bare `-MQ_SERVER_PID` is passed literally.
+  The **negative PID** is the classic Unix idiom: `kill -TERM -<pgid>` signals every
+  process in the group — both the wrapper *and* the `amqsevt` child — in one call; the
+  `--` is for procps-ng `/bin/kill`, so `-<pid>` reads as a process group, not an option.
 - No `trap` in the script. On `STOPCMD`, the wrapper receives `SIGTERM` via the
   group signal and terminates by its **default disposition**; it does not loop.
   This is what keeps the shell "dumb" and inside the bash envelope.
@@ -100,7 +103,7 @@ when the process MQ spawned is *already* a process-group leader; otherwise it ca
 `MQ_SERVER_PID == PGID == run.sh` with `amqsevt` as its child in that group — the
 case the group-kill relies on. If MQ *does* spawn the STARTCMD as a group leader,
 `setsid` forks and the QM-tracked PID diverges from the group leader (here `-w`
-prevents the parent exiting and orphaning the collector, but `-TERM -MQ_SERVER_PID`
+prevents the parent exiting and orphaning the collector, but `-TERM -- -+MQ_SERVER_PID+`
 would no longer target the child's session). Which case MQ actually gives us is
 determined empirically first (§5, A0), and the identity is asserted as a **named
 pre-flight checkpoint** (§5, A2 / §6, B2): **`MQ_SERVER_PID == PGID` and the QM is
@@ -332,8 +335,12 @@ their `Blocked-by` links are seeded from the plan (`epic-create` step 9).
   if MQ starts the STARTCMD as a group leader, `setsid` forks and `MQ_SERVER_PID`
   diverges from the group leader. Confirmed or refuted by the A0 inspection + the
   A2/B2 checkpoint; the §3.4 Python fallback is the contingency. Whether
-  `MQ_SERVER_PID` substitutes correctly inside a `-TERM -MQ_SERVER_PID` `STOPARG` is
-  part of this.
+  `MQ_SERVER_PID` substitutes correctly inside a `-TERM -- -+MQ_SERVER_PID+` `STOPARG`
+  is part of this. **Resolved (build time):** A0 shows MQ does *not* spawn the STARTCMD
+  as a group leader, so `setsid` execs in place and `MQ_SERVER_PID == PGID` holds; MQ
+  substitutes the insert only when delimited as `+MQ_SERVER_PID+` (the bare token is
+  passed literally), and `--` is required for procps-ng `/bin/kill`. Proven live — full
+  B-matrix PASS on nativeha-ubuntu (T7), no Python fallback needed.
 - **Open-retry bound: finite (~30 min) or infinite?** The 2042/open-failure retry
   needs a policy: retry a long bounded window then exit loud (surfaces a genuinely
   held queue), or retry indefinitely (relies purely on monitoring). Resolve at build
