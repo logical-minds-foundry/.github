@@ -111,8 +111,11 @@ is the first task and its findings are applied forward.
 ### 4.2 Correctness core — log-type-aware `LOGGEREV` (declare-and-verify)
 
 - **Declared intent.** A per-arm log-type declaration (e.g. `mq_log_type:
-  replicated | circular`) lives with the arm's group/role configuration — one
-  source of truth, explicit and readable.
+  replicated | circular`) lives with the arm's group/role configuration — the
+  explicit, readable statement of intent. It is a *second* statement of what
+  `crtmqm -lr` already implies, so the **live queue manager's actual log type is
+  the authority**: the declaration exists to make intent legible and to be
+  checked against reality, never to be trusted over it (see the verify step).
 - **Conditioned clause.** `mq-event-monitor` conditions the `LOGGEREV` clause on
   the declared type: **enabled** on the Native HA (replicated) arms; on circular
   arms the clause is **omitted** (or set per the S4 finding), never a silent gap.
@@ -139,11 +142,29 @@ emit: log-disk usage %, active/inactive extent counts, and enough to render a
 fill trend. Metric names/types are verified on a live exporter before the panel
 is wired (rate vs. gauge per `# TYPE`).
 
+**Instance scoping & failover.** A Native HA queue manager is three instances;
+only the **active** one writes the log and generates logger events. The two
+channels scope differently and both must be explicit:
+
+- **Channel A** already follows the active instance for free — the `amqsevt`
+  service is `CONTROL(QMGR)`, so it runs on whichever instance is active and
+  travels across failover (verified in the role: `service.yml:48,66`).
+- **Channel B runs on all three instances**, and each metric is tagged by
+  **instance** and **role** (active / replica). The role is sourced without MQI
+  (e.g. `dspmq -o nativeha` / `-o all`). The panel *leads* with the active
+  instance's lifecycle but *exposes per-replica divergence* — a replica whose log
+  disk is filling, or that is not reclaiming extents, is exactly the failure this
+  epic exists to surface, and it is only visible if all three are collected.
+
 **The panel.** A dedicated, **time-series-led** log-health panel group on the
-Native HA arms' cockpit: log-disk % with fill trend, extent counts over time,
-media-image recency, and a logger-event log. This is the deliverable that makes
+Native HA arms' cockpit: log-disk % with fill trend, extent counts over time, a
+logger-event log, and **media-image recency** — the last element **gated on spike
+S2/S3**: its source (a logger-event watermark or an `AMQERR` parse) is confirmed
+before it is wired, and if it proves unpollable without MQI the panel degrades
+gracefully rather than shipping a broken tile. This is the deliverable that makes
 the lifecycle legible at a glance. QM name is a variable, not hardcoded (per the
-dashboard de-hardcoding direction).
+dashboard de-hardcoding direction), and the panel is instance-aware per the
+scoping above.
 
 ### 4.4 Live-lab validation
 
@@ -198,9 +219,12 @@ observes and correctly configures around it).
 - **Log-type-aware `LOGGEREV`:** on the Native HA arms the enabling `ALTER`
   returns `AMQ8005I`; the declared-vs-actual log-type assertion passes; a forced
   drift fails loud. On circular arms the verified negative holds.
-- **Observability:** the collector emits log-health metrics on a live Native HA
-  arm; the panel group renders them time-series-led; logger events appear in the
-  event stream.
+- **Observability:** the collector emits log-health metrics on **all three
+  instances** of a live Native HA arm, tagged by instance and role; the panel
+  group renders them time-series-led and instance-aware, leading with the active
+  instance while exposing per-replica divergence; logger events appear in the
+  event stream. Media-image recency ships only if spike S2/S3 finds a non-MQI
+  source.
 - **Live-lab validation:** the induce-and-assert playbook drives log churn and
   asserts both the event and the panel reflect it — `Outcome: SUCCESS`.
 - **Cold rebuild:** the log-type-aware changes + the collector come up one-pass on
