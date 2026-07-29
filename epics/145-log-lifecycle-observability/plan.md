@@ -182,17 +182,16 @@ git commit -m "feat(events): log-type-aware LOGGEREV via declare-and-verify (#14
 
 ### Task 3: Log-health collector (`loglifecycle.py`) + deploy role
 
-Modelled verbatim on `src/mqlab/nativehastate.py` and `ansible/roles/nativeha-state/`.
+A **separate module** for clean separation (log-health vs. cluster-state, each testable alone, extraction-friendly per #79), but **deployed and scheduled by the existing `nativeha-state` role/timer** — no parallel role, no second timer — and it **reuses** `nativehastate.py`'s `dspmq -o nativeha` role-detection rather than re-implementing it (alignment decision, issue 1 → option A).
 
 **Files:**
-- Create: `src/mqlab/loglifecycle.py`
+- Create: `src/mqlab/loglifecycle.py` (imports the role-detection helper from `mqlab.nativehastate`; no duplicate `dspmq` parsing)
 - Create: `tests/test_loglifecycle.py`
-- Create: `ansible/roles/loglifecycle-state/tasks/main.yml`
-- Create: `ansible/roles/loglifecycle-state/templates/lab-loglifecycle-state.service.j2`
-- Create: `ansible/roles/loglifecycle-state/templates/lab-loglifecycle-state.timer.j2`
-- Modify: `ansible/observability.yml` (include the role on the nha groups)
+- Modify: `ansible/roles/nativeha-state/tasks/main.yml` (also install the `lab-loglifecycle-state` script and have the existing timer's service invoke it — a small wrapper runs both collectors, each writing its own `.prom` textfile)
+- Modify: `ansible/roles/nativeha-state/templates/lab-nativeha-state.service.j2` (run the log-health collector alongside the cluster-state one on the same fire)
+- No new role, no new timer, no `observability.yml` change (the role already runs on the nha groups)
 
-**Consumes:** S3 (pollable signals: log dir path, extent file scheme, disk fields).
+**Consumes:** S3 (pollable signals: log dir path, extent file scheme, disk fields); `nativehastate.py`'s role-detection helper (active/replica per instance).
 **Produces (consumed by Task 4):** node_exporter metrics —
 `mqlab_log_disk_used_bytes{qm,instance,role}`,
 `mqlab_log_disk_total_bytes{qm,instance,role}`,
@@ -238,7 +237,7 @@ Expected: FAIL (module not found).
 
 - [ ] **Step 3: Implement `loglifecycle.py` (stdlib-only), following the `nativehastate.py` skeleton**
 
-Structure: module docstring stating the deploy-verbatim + importable invariant; `parse_disk(df_out)`, `count_extents(listing, ...)`, `instance_role(dspmq_out, host)` pure functions; `probe()` running each source with a bounded `subprocess.run(..., timeout=...)` → STALE on timeout; `render_prom(rows)` → node_exporter textfile; `main()` argparse writing to the textfile dir. Log dir path / extent scheme from S3. No PyMQI, no third-party imports.
+Structure: module docstring stating the deploy-verbatim + importable invariant; `parse_disk(df_out)`, `count_extents(listing, ...)` pure functions; **role comes from the shared helper** — `import` `nativehastate`'s `dspmq -o nativeha` parser and derive active/replica from it rather than re-parsing `dspmq` here (the `instance_role` in the Step-1 test is a thin wrapper over that helper, not a second parser); `probe()` running each source with a bounded `subprocess.run(..., timeout=...)` → STALE on timeout; `render_prom(rows)` → node_exporter textfile; `main()` argparse writing to its own `.prom` in the textfile dir. Log dir path / extent scheme from S3. No PyMQI, no third-party imports.
 
 - [ ] **Step 4: Run tests to green + branch coverage**
 
@@ -248,16 +247,16 @@ uv run pytest tests/test_loglifecycle.py -v
 ```
 Expected: PASS, 100% branch coverage on the module.
 
-- [ ] **Step 5: Write the deploy role (systemd timer on all three instances)**
+- [ ] **Step 5: Extend the existing `nativeha-state` role to also run the log-health collector**
 
-Copy `ansible/roles/nativeha-state/` structure. The `.service.j2` runs `/usr/local/bin/lab-loglifecycle-state` (the copied `loglifecycle.py`) writing to the node_exporter textfile dir; the `.timer.j2` fires every ~5s. `tasks/main.yml` deploys the script + unit files on **every** nha instance (not just active). Include it on the nha groups in `observability.yml`.
+No new role, no new timer. In `ansible/roles/nativeha-state/tasks/main.yml`, deploy `loglifecycle.py` to the nodes as `/usr/local/bin/lab-loglifecycle-state` alongside the existing `lab-nativeha-state`. In `lab-nativeha-state.service.j2`, run both collectors on the same fire (a small wrapper, or a second `ExecStart=`), each writing its **own** `.prom` textfile. This lands on **every** nha instance (not just active) because the role already targets all three. Confirm the existing timer cadence (~5s) suits log-health sampling.
 
 - [ ] **Step 6: Validate + commit**
 
 ```bash
 vrg-container-run -- vrg-validate
-git add src/mqlab/loglifecycle.py tests/test_loglifecycle.py ansible/roles/loglifecycle-state ansible/observability.yml
-git commit -m "feat(obs): non-MQI log-health collector on the Native HA instances (#145)"
+git add src/mqlab/loglifecycle.py tests/test_loglifecycle.py ansible/roles/nativeha-state
+git commit -m "feat(obs): non-MQI log-health collector via the nativeha-state role (#145)"
 ```
 
 ---
@@ -341,7 +340,24 @@ Poll the event stream (journald / Loki, where `mq-event-monitor` lands events) f
 
 Scrape the nha exporter and assert `mqlab_log_extents_active` (or the disk/extent series) moved as expected on the active instance and that all three instances report a fresh (non-STALE) sample; `fail_msg` otherwise.
 
-- [ ] **Step 4: Validate + commit**
+- [ ] **Step 4: Negative path — prove the declare-and-verify guardrail fails loud on drift (spec §7)**
+
+Run the `mq-event-monitor` verify step against a **deliberately wrong** declaration (e.g. `mq_log_type: circular` forced on the replicated `$QM_NATIVE`) and assert the play **aborts** with the Task-2 drift message — an assertion that never fires is a dead guardrail. Restore the correct declaration afterward.
+
+```yaml
+- name: drift guardrail must fail loud (negative path, #145)
+  block:
+    - ansible.builtin.include_role:
+        name: mq-event-monitor
+      vars: {qmgr_name: "{{ qm_name }}", mq_log_type: circular}   # intentionally wrong
+    - ansible.builtin.fail:
+        msg: "drift guardrail did NOT fire — declare-and-verify is broken"
+  rescue:
+    - ansible.builtin.debug:
+        msg: "drift guardrail fired as expected"
+```
+
+- [ ] **Step 5: Validate + commit**
 
 ```bash
 vrg-container-run -- vrg-validate
@@ -381,6 +397,6 @@ git commit -m "docs(site): operator runbook for the Native HA log lifecycle (#14
 
 ## Self-Review
 
-- **Spec coverage:** §4.1 spike → Task 1; §4.2 declare-and-verify LOGGEREV → Task 2; §4.3 Channel A → Task 2 (existing `amqsevt` gains the class) + Channel B collector → Task 3 + panel → Task 4, incl. instance scoping (Task 3 all-three + role tag; Task 4 instance-aware series) and spike-gated media-image recency (Task 4 Step 3); §4.4 validation → Task 5; §4.5 runbook → Task 6; §7 cold-rebuild + live-lab → operational gates. No uncovered requirement.
+- **Spec coverage:** §4.1 spike → Task 1; §4.2 declare-and-verify LOGGEREV → Task 2, with its "forced drift fails loud" acceptance (§7) exercised by Task 5 Step 4; §4.3 Channel A → Task 2 (existing `amqsevt` gains the class) + Channel B collector → Task 3 (separate module, deployed by the existing `nativeha-state` role/timer, reusing its `dspmq` role-detection) + panel → Task 4, incl. instance scoping (Task 3 all-three + role tag; Task 4 instance-aware series) and spike-gated media-image recency (Task 4 Step 3); §4.4 validation → Task 5; §4.5 runbook → Task 6; §7 cold-rebuild + live-lab → operational gates. No uncovered requirement.
 - **Placeholders:** the two deliberately spike-gated unknowns (exact `DISPLAY QMGR` log-type attribute; extent file naming scheme) are explicitly routed to Task 1 findings with a named fallback, not left vague.
 - **Type consistency:** the `mqlab_log_*{qm,instance,role}` metric names are defined in Task 3's Produces and consumed verbatim in Task 4's tests; `_log_health_band` / `parse_disk` / `count_extents` / `instance_role` / `render_prom` names are consistent across their tasks.
