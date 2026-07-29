@@ -86,11 +86,15 @@ duration:
    events-per-hour by severity) that returns non-empty against **real** data.
    *(Demonstrating a specific interesting pattern — channel-retry frequency — is
    follow-on work that induces the condition; see §11–§12.)*
-4. The corpus lives on a **dedicated fixed-size persistent volume** backed by
-   `build/state/logsearch/` and **survives a `logsearch` node cold-rebuild**
-   (`vagrant destroy logsearch && … up` re-attaches the existing indices). It is
-   destroyed only by a full `build/` (macOS) / `/vergil` (cloud) purge — the
-   build-volume tier of ephemerality, and no more.
+4. The corpus is durable at the **build-volume tier via host-side snapshots**:
+   `mqlab logsearch snapshot` captures a consistent copy to `build/state/logsearch/`
+   (host-durable on `/vergil` / macOS `build/`), and bring-up **auto-restores** the
+   latest snapshot if one exists. So a `logsearch` node cold-rebuild — or a full
+   `vrg-vm rebuild` — preserves history **provided a snapshot was taken first**
+   (automatable into graceful teardown). A rebuild with no prior snapshot starts
+   empty: an accepted, explicit tradeoff. History dies only on a `build/` / `/vergil`
+   purge. *(The live corpus runs on the guest's ordinary ephemeral disk; durability
+   is the snapshot, not a persistent volume — see §7 and #386/#397.)*
 5. `mqlab logsearch status` reports tier health **including disk-used and any
    read-only-index state**, so a full or wedged tier is **loud, not silent**;
    `mqlab logsearch open` prints the Dashboards URL.
@@ -148,8 +152,8 @@ cluster/app logs   ─┘  (collector)│
                                   └──────────────► OpenSearch ──► OpenSearch Dashboards
                                      NEW second sink              (3rd/4th order: historical/search)
                                                   │
-                                                  └── path.data → dedicated fixed-size volume
-                                                                  (build/state/logsearch/, tier-2 durable)
+                          path.data → guest disk (ephemeral) ── mqlab logsearch snapshot ──►
+                                                  build/state/logsearch/ (host-durable, auto-restored on bring-up)
 ```
 
 This honours the JSON-logging design's explicit principle that **transport is a
@@ -181,10 +185,16 @@ baked in):
   `lab/boxes/build-fatbox.sh --box logsearch-ubuntu2404` (mirroring
   `--box obs-ubuntu2404` and `ansible/bake-obs.yml`), with OpenSearch +
   OpenSearch Dashboards + node-exporter + Alloy baked in.
+- **Data location.** The live corpus is OpenSearch's `path.data` on the guest's own
+  **ephemeral** disk (the libvirt default pool, wiped on rebuild like every other
+  guest volume — #386/#397). Durability is the host-side snapshot (§7), not a
+  persistent volume.
 - **Host prerequisites baked into the role/box.** `vm.max_map_count = 262144`
   (OpenSearch refuses to start otherwise) and the OpenSearch **version pinned** via
   the repo's version-manifest mechanism — so a routine re-bake never installs a
-  newer major that cannot open the persisted indices on the durable volume (§7).
+  version that cannot **restore** an existing snapshot (OpenSearch refuses to restore
+  a snapshot taken by a newer version; a pin keeps the snapshot/restore contract
+  stable — §7).
 - **Rationale.** Its own node (a) prevents the JVM from contending with
   Prometheus/Grafana/Loki on `obs`, and (b) keeps the tier a clean, liftable unit —
   consistent with the OSS-component-boundary principle (configure only what it
@@ -221,46 +231,59 @@ cluster, so health reads **green** honestly rather than a permanent replica-star
 
 ---
 
-## 7. Storage & persistence — the build-volume tier
+## 7. Storage & persistence — host-side snapshot/restore
 
-The corpus sits at the **build-volume tier of ephemerality**: it survives node/VM
-cold-rebuilds (so you can iterate on the `logsearch` node without losing history),
-and is destroyed only by an intentional full `build/` (macOS) / `/vergil` (cloud)
-purge. As durable as we want, and no more — the same gitignored, unmanaged,
-purge-at-whim convenience that makes the baked boxes stable.
+The corpus sits at the **build-volume tier of ephemerality**, but the lab's
+architecture dictates *how* it gets there, and it is not a live persistent volume.
 
-**Mechanism: a dedicated fixed-size persistent block volume.** OpenSearch runs
-*inside* the `logsearch` guest, and the lab deliberately disables synced folders
-(`lab/Vagrantfile:26`), so the in-guest process cannot see the host `build/` tree.
-The corpus therefore lives on a **dedicated libvirt data volume**:
+**Why not a persistent volume (the reality check).** OpenSearch runs *inside* the
+`logsearch` guest. Guest volumes live in libvirt's default pool on the **ephemeral
+boot disk** and are wiped on rebuild; the lab **tried** redirecting persistent VM
+storage onto `/vergil` and **reverted it** — #376 *"put wipe-on-rebuild overlays on a
+never-wiped disk, orphaning volumes and breaking rebuilds,"* reverted in **#386**
+(`bb5bcd7`) and documented in **#397** (`97d2539`): *"the VM image pool lives on the
+ephemeral boot disk, not /vergil."* And synced folders are disabled
+(`lab/Vagrantfile:26`), so the guest cannot mount `build/` either. A keep-on-`destroy`
+data volume is therefore the exact mechanism the lab already abandoned. We do not
+resurrect it.
 
-- Backed by `build/state/logsearch/` (resolved via **`mqlab build path state`**,
-  never a hardcoded `build/<X>` path) — the *irreplaceable, shared* bucket that
-  survives a routine `mqlab build clean` and is dropped only under the explicit
-  `--yes-destroy-state` guard
+**Mechanism: host-side snapshot/restore** — the same idiom the lab already uses to
+persist in-guest state (`lab/scripts/lab-snapshot.sh` writes golden VM state to
+`build/state/snapshots/`), and the one path that reaches host-durable storage without
+a live mount:
+
+- The **live corpus** runs on the guest's ordinary ephemeral `path.data`.
+- **`mqlab logsearch snapshot`** captures a **consistent** copy and lands it under
+  **`build/state/logsearch/`** on the host (resolved via **`mqlab build path state`**,
+  never a hardcoded `build/<X>` path) — the *irreplaceable, shared* bucket
   ([`docs/development/build-layout.md`](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/blob/develop/docs/development/build-layout.md)),
-  in the same host-durable family as `build/state/boxes/` and
-  `build/state/snapshots/`.
-- Attached to the guest as a **real block device** (native filesystem semantics and
-  performance) and mounted at OpenSearch's `path.data`. **Not** a synced
-  folder / virtiofs mount: OpenSearch is mmap-heavy and explicitly warns against
-  passthrough/shared filesystems for its data path, so a block volume is the correct
-  (and only safe) choice for a data store.
-- **Kept across `vagrant destroy`** so a node cold-rebuild re-attaches the existing
-  indices. Adding `logsearch/` as a new `state/` subdir is a documented change to the
-  bucket inventory in `build-layout.md` (picked up by the doc-review bookend, `#818`).
+  in the same host-durable family as `build/state/snapshots/`. Transport is
+  **Ansible** (fetch guest → host), consistent with the Vagrantfile's *"Ansible owns
+  file transport"* — no synced folder.
+- **Bring-up auto-restores** the latest snapshot if one exists in
+  `build/state/logsearch/` (the `site-logsearch.yml` configure half stages it back to
+  the guest and restores before/at OpenSearch start).
 
-**Fixed size is a feature, not a limitation.** The volume is sized up front, which
-**bounds** how much of `build/` this can ever consume — directly addressing the
-disk-limit pain the lab has hit before. It caps the footprint, and OpenSearch's disk
-**flood-stage watermark** (default 95%) acts as a clean guardrail against a bounded
-ceiling rather than a runaway across the whole host disk.
+**The durability contract (accepted tradeoff).** Preserving history across a rebuild
+requires a **snapshot action first** — which we automate into the graceful
+shutdown/rebuild path. Blow the node (or the whole dev box) away *without* snapshotting
+and it comes back empty; that is acceptable and explicit. History dies only on a
+`build/` / `/vergil` purge. Point-in-time, not continuous — bounded loss is covered by
+auto-snapshot on graceful teardown plus an optional periodic snapshot.
 
-**Retention is out of scope for v1.** Within the fixed volume the corpus accumulates
-by default; automated retention/GC is a named follow-on (`#819`), modelled on
-baked-image GC. v1's obligations are only: **do not lose data on a node rebuild**,
-**bound the footprint** (fixed volume), and **fail loud** when full (§5, §9) — never
-silently wedge.
+**Snapshot mechanism (spike, §13).** Either OpenSearch's native snapshot API (register
+a filesystem repository, `_snapshot`) or a cold copy of a *stopped* `path.data`; the
+spike picks one on evidence. Adding `logsearch/` as a new `state/` subdir is a
+documented change to the bucket inventory in `build-layout.md` (doc-review bookend
+`#818`).
+
+**Disk safety — two bounded surfaces.** (1) The **live** corpus is bounded by the
+guest data disk; OpenSearch's disk **flood-stage watermark** (default 95%) is the
+guardrail, surfaced loudly by `mqlab logsearch status` (§9) rather than wedging
+silently. (2) The **snapshots** in `build/` are bounded by keeping the last *N* — but
+snapshot GC / retention is a named follow-on (`#819`), modelled on baked-image GC.
+v1's only obligations: **restore what was snapshotted**, and **fail loud** when the
+live disk fills.
 
 ---
 
@@ -270,17 +293,21 @@ Ansible, not shell (native modules give idempotency and fail-loud for free), and
 structural mirror of the observability provisioning:
 
 - Roles: `opensearch` and `opensearch-dashboards` under `ansible/roles/`,
-  peers of the existing `loki` / `grafana` / `prometheus` / `alloy` roles. The
-  `opensearch` role owns: the `vm.max_map_count` sysctl, the pinned version, the
-  data-dir mount on the persistent volume, and the index template
-  (`number_of_replicas: 0`, daily indices).
-- Play: `ansible/site-logsearch.yml` (configure half) + `ansible/bake-logsearch.yml`
-  (bake half), mirroring `site-obs.yml` / `bake-obs.yml`.
+  peers of the existing `loki` / `grafana` / `prometheus` / `alloy` roles, each split
+  along the same bake/configure line as `loki` (`tasks/install.yml` +
+  `tasks/configure.yml` + `tasks/main.yml`). The `opensearch` role owns: the
+  `vm.max_map_count` sysctl, the pinned version, `path.data` on the guest disk, the
+  index template (`number_of_replicas: 0`, daily indices), the snapshot filesystem
+  repository, and the **restore-on-bring-up** step.
+- Play: `ansible/site-logsearch.yml` (configure half — enable+start, plus stage &
+  auto-restore the latest host snapshot if present) + `ansible/bake-logsearch.yml`
+  (bake half — binaries + static config, inert), mirroring `site-obs.yml` /
+  `bake-obs.yml`.
 - The Alloy fan-out sink is added to the existing `alloy` role's config template,
   gated so only the intended sources are duplicated to OpenSearch.
-- The persistent-volume attach + keep-on-`destroy` behaviour is wired through the
-  topology/`Vagrantfile` (vagrant-libvirt additional-disk lifecycle) — confirmed by
-  a spike (§13) since the lab has no existing keep-on-destroy volume precedent.
+- Snapshot/restore transport is **Ansible fetch/copy** between the guest snapshot
+  repository and `build/state/logsearch/` on the control host — no synced folder, no
+  keep-on-`destroy` volume (which #386/#397 ruled out).
 
 ---
 
@@ -291,9 +318,14 @@ A new `mqlab logsearch` command group (a `src/mqlab/logsearch.py` module wired i
 
 - `mqlab logsearch status` — tier health: node reachable, OpenSearch cluster status
   (**green** expected on a single node with `replicas: 0`; red / unreachable is the
-  only failure), Dashboards up, index/doc counts, **disk-used on the data volume,
-  and any read-only-index state** so a full tier is loud.
+  only failure), Dashboards up, index/doc counts, **disk-used on `path.data`, and any
+  read-only-index state** so a full tier is loud.
 - `mqlab logsearch open` (a.k.a. `url`) — print the OpenSearch Dashboards URL.
+- `mqlab logsearch snapshot` — capture a consistent snapshot to `build/state/logsearch/`
+  (the durable, host-side copy; automatable into graceful teardown).
+- `mqlab logsearch restore [--snapshot <id>]` — restore the latest (or a named)
+  host snapshot into the live store. *(Bring-up already auto-restores the latest via
+  `site-logsearch.yml`; this is the manual/explicit verb.)*
 
 Error vocabulary follows the layered convention: `mqlab` messages name
 fully-qualified `mqlab` commands; OpenSearch's own tooling speaks for itself. No
@@ -340,8 +372,10 @@ itself a named follow-on (`#819`), not a v1 blocker.
   1. **Baseline (always true on a healthy build):** the node is up and reachable,
      ingestion is *flowing* (doc count rising), the corpus is full-text-searchable,
      and a generic time-bucketed aggregation returns non-empty.
-  2. **Persistence:** `vagrant destroy logsearch && … up` **re-attaches** the
-     existing corpus (the durable volume survives the node rebuild).
+  2. **Snapshot/restore round-trip:** `mqlab logsearch snapshot` →
+     `vagrant destroy logsearch && … up` → bring-up **auto-restores** → the corpus is
+     present again. (And, as the documented tradeoff, a destroy with *no* prior
+     snapshot comes back empty — the accepted behaviour, not a failure.)
   3. **Loud-not-silent:** `mqlab logsearch status` surfaces disk-used and would
      report a read-only/full state rather than wedging silently.
   Demonstrating a *specific induced pattern* (e.g. channel-retry frequency) is
@@ -386,14 +420,12 @@ trap; if ever wanted, it is its own initiative, not scope creep on standing up v
 1. **Alloy → OpenSearch connector** (§6) — native `otelcol` exporter vs. Data
    Prepper fallback. Resolved by the first (gating) spike; the fallback guarantees
    the path cannot dead-end.
-2. **Persistent-volume keep-on-`destroy`** (§7, §8) — confirm the vagrant-libvirt
-   additional-disk approach that survives `vagrant destroy`; the lab has no existing
-   precedent, so this is a spike.
-3. **Volume size** — the fixed allocation for `build/state/logsearch/`; sized for a
-   useful multi-day corpus while bounding build-disk consumption. Confirmed
-   empirically.
-4. **Node sizing** (§5) — 6 GB vs 8 GB heap headroom; confirmed during the
-   cold-rebuild validation.
-5. **Which nodes' logs fan out in v1** — the full fleet, or an initial subset
+2. **Snapshot mechanism** (§7) — OpenSearch native snapshot API (register a
+   filesystem repository) vs. a cold copy of a *stopped* `path.data`. Spike to pick;
+   both land in `build/state/logsearch/` via Ansible.
+3. **Node / guest-disk sizing** (§5, §7) — heap headroom (6 vs 8 GB) and the guest
+   `path.data` disk size that bounds the live corpus before the flood watermark.
+   Confirmed empirically during the cold-rebuild validation.
+4. **Which nodes' logs fan out in v1** — the full fleet, or an initial subset
    matching the mqweb-tail gating already in `observability.yml`. Leaning: the same
    source set Loki already receives, for parity.
