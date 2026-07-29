@@ -83,14 +83,15 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 - Modify: `ansible/roles/opensearch/tasks/main.yml` (add `import_tasks: configure.yml`)
 
 **Interfaces:**
-- Consumes: Task 2's snapshot mechanism decision; the runtime-injected `OPENSEARCH_ADMIN_*` credential.
-- Produces: a running OpenSearch (green on single node), the `logs-*` index template with `number_of_replicas: 0` + daily-index pattern, a registered snapshot repository, and the **restore-on-bring-up** behavior. Consumed by Task 10, Task 11, Task 12.
+- Consumes: Task 2's snapshot mechanism decision.
+- Produces: the `OPENSEARCH_ADMIN_*` credential seam (via `build/state/secrets/`); a running OpenSearch (green on single node); the `logs-*` index template with `number_of_replicas: 0` + daily-index pattern; a registered snapshot repository; the **restore-on-bring-up** behavior. Consumed by Task 5 (reuses the credential seam), Task 10, Task 11, Task 12.
 
-- [ ] **Step 1: Enable + start** the `opensearch` unit; inject the admin password from the runtime seam (same mechanism grafana's admin-password drop-in uses). Wait for `_cluster/health` reachable.
-- [ ] **Step 2: `index-template.json.j2`** — `index_patterns: ["logs-*"]`, `settings.number_of_replicas: 0`, mappings for the log envelope (timestamp, level/severity, host, unit, message). `PUT _index_template/logs` (idempotent).
-- [ ] **Step 3: Register the snapshot repo** (`PUT _snapshot/logsearch-fs` with `type: fs`, `settings.location: {{ path.repo }}`), per Task 2.
-- [ ] **Step 4: Restore-on-bring-up.** If `build/state/logsearch/<latest>` exists on the control host: copy it to the guest repo dir (Ansible `copy`/`synchronize`), then `POST _snapshot/logsearch-fs/<latest>/_restore`. Guarded so a fresh build (no snapshot) is a clean no-op, logged clearly (not a silent skip).
-- [ ] **Step 5: Lint + commit** (`--type feat --scope logsearch`).
+- [ ] **Step 1: Establish the credential source (§10).** Source/generate the `OPENSEARCH_ADMIN_*` credential via the **existing** lab secret mechanism — `lab/scripts/lab-secret.sh` staging under `build/state/secrets/` (host-durable, gitignored, never committed) — the same runtime seam grafana's admin password uses. Fail loud if the secret cannot be materialized; never fall back to a default password.
+- [ ] **Step 2: Enable + start** the `opensearch` unit with `OPENSEARCH_INITIAL_ADMIN_PASSWORD` from Step 1's seam. Wait for `_cluster/health` reachable (authenticated with the injected credential).
+- [ ] **Step 3: `index-template.json.j2`** — `index_patterns: ["logs-*"]`, `settings.number_of_replicas: 0`, mappings for the log envelope (timestamp, level/severity, host, unit, message). `PUT _index_template/logs` (idempotent).
+- [ ] **Step 4: Register the snapshot repo** (`PUT _snapshot/logsearch-fs` with `type: fs`, `settings.location: {{ path.repo }}`), per Task 2.
+- [ ] **Step 5: Restore-on-bring-up.** If `build/state/logsearch/<latest>` exists on the control host: copy it to the guest repo dir (Ansible `copy`/`synchronize`), then `POST _snapshot/logsearch-fs/<latest>/_restore`. Guarded so a fresh build (no snapshot) is a clean no-op, logged clearly (not a silent skip).
+- [ ] **Step 6: Lint + commit** (`--type feat --scope logsearch`).
 
 ---
 
@@ -100,13 +101,14 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 - Create: `ansible/roles/opensearch-dashboards/tasks/{main,install,configure}.yml`, `defaults/main.yml`, `templates/opensearch_dashboards.yml.j2`, `handlers/main.yml`
 
 **Interfaces:**
-- Consumes: the running OpenSearch from Task 4 (`opensearch.hosts`).
-- Produces: OpenSearch Dashboards reachable on the mgmt plane at a known port (default 5601), pointed at the local OpenSearch. Consumed by Task 11 (`open`), Task 12.
+- Consumes: the running OpenSearch from Task 4 (`opensearch.hosts`); the `OPENSEARCH_ADMIN_*` credential seam from Task 4 Step 1.
+- Produces: OpenSearch Dashboards reachable on the mgmt plane at a known port (default 5601), pointed at the local OpenSearch, **with a default `logs-*` index pattern** so Discover works out of the box. Consumed by Task 11 (`open`), Task 12.
 
 - [ ] **Step 1: `install.yml`** — install the Dashboards package at the pinned version (Task 6); drop `opensearch_dashboards.yml.j2` (`server.host` = mgmt IP, `opensearch.hosts` = local OpenSearch, `server.port`); install the unit inert.
-- [ ] **Step 2: `configure.yml`** — enable + start; inject the OpenSearch credential; wait for `/api/status` green.
-- [ ] **Step 3: `main.yml`** imports install then configure.
-- [ ] **Step 4: Lint + commit** (`--type feat --scope logsearch`).
+- [ ] **Step 2: `configure.yml`** — enable + start; inject the OpenSearch credential from the Task 4 seam (`build/state/secrets/`); wait for `/api/status` green.
+- [ ] **Step 3: Create the default `logs-*` index pattern** (PLUMBING, not seeded content — spec §2 non-goal covers seeded *queries/saved-searches/dashboards*, not the pattern that makes Discover display the corpus at all). Idempotent `POST` to the Dashboards saved-objects API for an `index-pattern` over `logs-*` with the timestamp field. Without this, Discover opens empty and criterion #3 fails.
+- [ ] **Step 4: `main.yml`** imports install then configure.
+- [ ] **Step 5: Lint + commit** (`--type feat --scope logsearch`).
 
 ---
 
@@ -293,14 +295,14 @@ This is the epic's `validation` operational task (filed on GitHub at plan close,
 ## Self-Review
 
 **Spec coverage:**
-- §2 criteria 1–6 → Tasks 3–5/7/8 (node+engine), 9 (fan-out), 11 (Discover reachable via `open`; status), 4/11/12 (snapshot/restore), 8/11 (unit tests). ✔
+- §2 criteria 1–6 → Tasks 3–5/7/8 (node+engine), 9 (fan-out), 5 (`logs-*` index pattern so Discover works) + 11 (Discover reachable via `open`; status), 4/11/12 (snapshot/restore), 8/11 (unit tests). ✔
 - §4 fan-out / stack-agnostic → Task 9 (re-uses envelope sources). ✔
 - §5 node (single, sized, max_map_count, version pin, node-exporter) → Tasks 3/6/7/8. ✔
 - §6 connector spike-first + Data Prepper fallback; daily indices + replicas:0 → Tasks 1, 4. ✔
 - §7 snapshot/restore, build/state/logsearch via `mqlab build path state`, disk safety → Tasks 2, 4, 11, 12. ✔
 - §8 roles (bake/configure split), plays, Ansible transport → Tasks 3–5, 7, 10. ✔
 - §9 CLI (status/open/snapshot/restore), layered errors → Task 11. ✔
-- §10 mgmt-plane + runtime-injected cred → Tasks 4/5 (configure-half injection), 8 (mgmt-only NIC). ✔
+- §10 mgmt-plane + runtime-injected cred → Task 4 Step 1 (credential seam via `build/state/secrets/`/`lab-secret.sh`), reused by Task 5; Task 8 (mgmt-only NIC). ✔
 - §11 cold-rebuild gate + assertions → Task 12. ✔
 - §12 follow-ons → out of scope (tracked in #819); §13 open questions → resolved by Tasks 1, 2, 8. ✔
 
