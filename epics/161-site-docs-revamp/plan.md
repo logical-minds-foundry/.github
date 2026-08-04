@@ -201,8 +201,9 @@ docs/reports/<date>-getting-started-from-scratch.md   # NEW — validation repor
 
 **Precondition (human-attested):** Task 7's pipeline produces a verifiable artifact; `pyproject.toml`/`VERSION`/tag agree on the release version.
 
-- [ ] **Step 1 — Human cuts the release.** Human bumps version if needed, pushes the real `vX.Y.Z` tag via `! git tag … && git push origin …` (agent never cuts a release). The workflow publishes the signed Release.
-- [ ] **Step 2 — Confirm downloadable + verifiable.** From a plain HTTPS client: fetch the tarball + `SHA256SUMS.asc`; `gpg --recv-keys <fingerprint>`; `gpg --verify`; `sha256sum -c`. Record `Outcome: SUCCESS` (or FAILURE + logs) as a comment.
+- [ ] **Step 1 — Write the launch changelog + release notes.** Before cutting the tag, add the `v1.0.0` entry to `CHANGELOG.md` and the matching `releases/` note announcing the public launch, so the released artifact and the site's `Releases` section are coherent. Stage + strict-build the docs (`vrg-docs-stage` → `vrg-container-docs build --strict`) to confirm the Releases nav renders. This lands via a normal PR before the tag.
+- [ ] **Step 2 — Human cuts the release.** Human bumps version if needed, pushes the real `vX.Y.Z` tag via `! git tag … && git push origin …` (agent never cuts a release). The workflow publishes the signed Release.
+- [ ] **Step 3 — Confirm downloadable + verifiable.** From a plain HTTPS client: fetch the tarball + `SHA256SUMS.asc`; `gpg --recv-keys <fingerprint>`; `gpg --verify`; `sha256sum -c`. Record `Outcome: SUCCESS` (or FAILURE + logs) as a comment.
 
 **Acceptance (`Outcome: SUCCESS`):** A real signed release is published and verifies out-of-band over HTTPS.
 
