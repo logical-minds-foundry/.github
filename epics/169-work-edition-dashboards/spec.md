@@ -71,20 +71,32 @@ simultaneously (a) the deliverable of the upstream project producing the data an
 that makes a board portable. Board queries bind to the contract; the contract is what is
 carried to work. Nothing hardcodes a datasource UID, a QM name, or an undocumented field.
 
-- **Prometheus / `ibmmq_*`** — no contract needed. Identical exporter and schema at work.
-  Panels reference a `$datasource` variable; the only per-site difference is which Prometheus
-  the user picks on import.
+- **Prometheus schema note** (`ibmmq_*`) — *not* contract-free. The whole reusability
+  mechanism hinges on one query (`label_values(ibmmq_qmgr_status, qmgr)`), and the exact metric
+  names and label keys emitted by `mq_prometheus` depend on the **mq-metric-samples version**
+  and its **config** (e.g. `monitoredQueues` gates whether some series exist at all). So the
+  Prometheus path gets a short **schema note**: the exact metric names + label keys the boards
+  bind to, plus the exporter version and config they assume. This turns "assumed identical" into
+  a one-time verified check at work (import → confirm `$qmgr` populates → done) and gives a
+  concrete list to sanity-check against work's exporter before the JSON is even emailed. Panels
+  reference a `$datasource` variable; the per-site difference is which Prometheus the user picks.
 - **Metric contract** (Infra board) — exact metric names, labels, source CLI commands
   (`dspmq -o nativeha` and the CRR status commands), parsing rules, and output format for the
   `cluster_nha_*` / CRR link·lag·role signals. Produced by the collector extraction (#79) and
-  handed to Claude-at-work as prose to regenerate a faithful collector `.py`. The board's
-  PromQL binds to these names.
+  handed to Claude-at-work as prose to regenerate a faithful collector `.py`. **The contract
+  ships with golden sample output** — a literal captured block of the collector's `/metrics`
+  (representative lines per series, with labels and a sample value, taken from the lab) — so the
+  regenerated work collector can be **diffed against the golden block**: match = faithful,
+  mismatch = caught *before* the infra board is trusted. This is the cheapest fidelity gate that
+  survives the no-code-import constraint and honours the "never ship a silently-empty panel"
+  stance (§6). The board's PromQL binds to these names.
 - **ES doc/field contract** (logs + events) — index/data-stream name and the field names the
   panels query (`@timestamp`, `severity`, `qmgr`, `object`, `reason_code`, `message`). Produced
   by the LogSearch project. The board's Lucene queries bind to it.
 
-Concrete deliverables: **three boards + two short contract documents + per-board prior-art
-citations.**
+Concrete deliverables: **three boards + three contract documents** (Prometheus schema note,
+Native HA CRR metric contract with golden sample output, ES doc/field contract) **+ per-board
+prior-art citations.**
 
 ### 3.3 Iteration as a first-class requirement
 
@@ -100,16 +112,20 @@ Two primary datasources at work, both selected through template variables:
 - **Elasticsearch** (`$logs`, type `elasticsearch`) — logs and MQ events.
 
 The lab's Alloy/Loki stack stays in place — good infrastructure, worth keeping — but is
-**lab-only**. Log/event panels are developed first against Loki as a *placeholder*, then
-switched to Elasticsearch once LogSearch lands. The author expects the Elasticsearch form to
-translate to work more easily than the Alloy/Loki form.
+**lab-only**, serving the lab's own object-driven boards. The **work-edition** log/event panels
+are built **once, against Elasticsearch** (Wave 1b), with **no Loki placeholder**: a Loki panel
+(LogQL, Loki datasource type) and an ES panel (Lucene, ES datasource type, different field
+mapping) share almost nothing, so a Loki-first step would mean building the log/event panels
+twice *and* shipping a work board whose log section cannot function (work has no Loki). LogSearch
+is being built **in parallel now** (~1–2 days out), so Wave 1b lands close behind 1a. The author
+expects the Elasticsearch form to translate to work more easily than the Alloy/Loki form.
 
 ## 5. Reusability — variable-driven, one board per view
 
 Each board is a single reusable artifact driven by dropdowns, not a per-object board:
 
 - `$datasource` — pick work's Prometheus on import.
-- `$logs` — pick work's Elasticsearch (Loki in the lab until LogSearch lands).
+- `$logs` — pick work's Elasticsearch (work-edition log/event panels are ES-only, Wave 1b).
 - `$qmgr` — `label_values(ibmmq_qmgr_status, qmgr)`; one board serves every QM.
 - `$queue`, `$channel` — multi-select `label_values(...)` scoped to `$qmgr` (Queue/channel
   board).
@@ -130,38 +146,50 @@ Applied identically on all three boards so they read as one system:
    dashboards-lead-with-time-series convention.
 3. **Thresholds encode "error" in the panel** — depth% red above threshold, channel status red
    when stopped, DLQ depth red when > 0, quorum red when lost.
-4. **An "attention" table shows only breaching objects, worst-first** — the literal signal in
-   the noise. Empty-of-red = healthy.
+4. **The Attention + Inventory pair** — the canonical realization of signal-in-the-noise, used
+   on every board that lists objects (queues, channels, replicas):
+   - a **hero "Attention" table** whose *query itself* filters to breaching objects (e.g. PromQL
+     `... > threshold`), so healthy objects don't appear at all — **empty = healthy**, the
+     literal signal in the noise; and
+   - a **collapsible "Inventory" table** below it — *all* objects, threshold-colored, sorted
+     worst-first — the full census kept one click away for investigation.
+
+   Grafana tables don't filter rows by threshold natively, so "empty = healthy" is achieved by
+   pushing the filter into the query, not by row-coloring. The two panels are complementary, not
+   alternatives: Attention answers "is anything wrong?", Inventory answers "show me everything."
 5. **The event/log feed defaults to error-severity** (`$level`) — signal, not a firehose.
 
 ## 7. The three boards (purpose + structure; panel detail deferred)
 
 Panel-level detail — exact metrics, channel-type scenarios, thresholds — is **deliberately
-deferred** to the research → co-development phase (§8). What follows is the approved *structure*.
+deferred** to the research → co-development phase (§10). What follows is the approved *structure*.
 
-### 7.1 QM view — Wave 1 (buildable now, pure `ibmmq_*`)
+### 7.1 QM view — Wave 1a metrics (pure `ibmmq_*`) + Wave 1b ES feed
 
 "Is this queue manager healthy, and is it trending toward trouble?" QM-scoped by design; all
 per-queue/per-channel breach detail lives on the Queue/channel board, one drill-link away.
 
-- **① Status band:** QM status · Uptime · Services (initiator ∧ command server ∧ listeners) ·
-  Connections.
-- **② Trend band:** message rate · recovery-log % · connections over time.
-- **③ Attention:** services detail (which piece is down) · QM event feed · error-log feed.
+- **① Status band** *(1a)***:** QM status · Uptime · Services (initiator ∧ command server ∧
+  listeners) · Connections.
+- **② Trend band** *(1a)***:** message rate · recovery-log % · connections over time.
+- **③ Attention** *(1a)***:** services detail (which piece is down).
+- **④ Event / error feed** *(1b, ES)*: QM event feed + error-log feed, severity-filtered.
 - **Drill-down seam:** a data link carries `$qmgr` → the Queue/channel board.
 
-### 7.2 Queue/channel view — Wave 1 (buildable now, pure `ibmmq_*`)
+### 7.2 Queue/channel view — Wave 1a metrics (pure `ibmmq_*`) + Wave 1b ES feed
 
 "Which queues and channels on `$qmgr` are in trouble, and is anything backing up?" The
 signal-in-the-noise showcase.
 
-- **① Status band:** queues in trouble (count) · channels not running (count) · DLQ depth
-  (red > 0) · oldest message age.
-- **② Attention tables:** queues sorted by depth% desc, threshold-colored; channels by status
-  (Retrying/Stopped/in-doubt float up).
-- **③ Trend band:** depth over time · put-vs-get on one graph (the leading indicator) · channel
-  throughput · backout rate.
-- **④ Event/log feed:** channel and performance events, severity-filtered.
+- **① Status band** *(1a)***:** queues in trouble (count) · channels not running (count) · DLQ
+  depth (red > 0) · oldest message age.
+- **② Attention + Inventory** *(1a)* — per §6.4, for both queues and channels: a query-filtered
+  **Attention** table (only breaching, **empty = healthy**) as the hero, plus a collapsible
+  **Inventory** table (all objects, threshold-colored, worst-first). Channel Attention floats
+  Retrying/Stopped/in-doubt.
+- **③ Trend band** *(1a)***:** depth over time · put-vs-get on one graph (the leading indicator)
+  · channel throughput · backout rate.
+- **④ Event/log feed** *(1b, ES)*: channel and performance events, severity-filtered.
 
 **Verification caveat:** several bindings — `maxdepth`/depth%, oldest-message-age, per-queue
 backout — must be verified against a live exporter's `/metrics` before commit. The
@@ -177,19 +205,23 @@ messaging. Bindings are `cluster_nha_*` / CRR custom-collector metrics — **not
 `ibmmq_*` — so this board is gated on the collector extraction (#79). Scope is **Native HA CRR
 only**; RDQM and Pacemaker/DRBD are out of scope (§2). A coworker has already extracted some
 Native HA CRR data at work, which is a starting point for the collector's prose contract.
+Replica/component state uses the same **Attention + Inventory** pair (§6.4). Fidelity of the
+work-regenerated collector is verified against the **golden sample output** shipped with the
+metric contract (§3.2) — no code import, just a diff.
 
 ## 8. Wave phasing & dependency graph
 
 | Wave | Board(s) | Metrics | Logs/events | Prerequisite |
 |------|----------|---------|-------------|--------------|
-| **1 — now** | QM view · Queue/channel view | `ibmmq_*` (ready) | Loki placeholder → ES | LogSearch (~1–2 days) for the ES switch |
-| **2 — next** | Infra / HA-DR (Native HA CRR) | `cluster_nha_*` / CRR collectors | ES event feed | collector extraction (#79) + prose-spec regen at work |
+| **1a — now** | QM view · Queue/channel view (metric panels) | `ibmmq_*` (ready) | — | Prometheus schema note (§3.2) verified against work's exporter |
+| **1b — days** | QM · Queue/channel **ES event/log feed** | — | ES (built once, no Loki) | LogSearch (in parallel now, ~1–2 days) + ES doc/field contract |
+| **2 — next** | Infra / HA-DR (Native HA CRR) | `cluster_nha_*` / CRR collectors | ES event feed | collector extraction (#79) + prose-spec regen at work + golden-output diff |
 | **backlog** | RDQM / Pacemaker infra | — | — | work does not run these — future follow-on epic |
 
 **External dependencies (not children of this epic):**
 
-- **LogSearch project** (just kicked off, ~1–2 days) — ships lab logs + MQ events to
-  Elasticsearch and defines the ES doc/field contract. Unblocks the Wave-1 ES switch.
+- **LogSearch project** (in parallel now, ~1–2 days) — ships lab logs + MQ events to
+  Elasticsearch and defines the ES doc/field contract. Unblocks **Wave 1b**.
 - **Collector extraction** (#79, `mq-resiliency-observability`) — finish extracting the HA/DR
   collectors into a standalone, exportable form and produce the metric contract. The Wave-2
   infra-board tasks are `Blocked-by` this landing.
