@@ -408,10 +408,14 @@ instance). Resolves the ⚠ items flagged in the JUDGMENT section:
   come from **ES events**, not Prometheus.
 - **in-doubt — NOT a stock series.** No stock in-doubt metric → from CHSTATUS / **ES events**, not
   Prometheus.
-- **`ibmmq_nha_*` — NONE scraped anywhere.** Confirms Board 3's role/quorum/**GRPROLE(Live/Recovery)**/
-  BACKLOG surface is available only via **`dspmq -o nativeha -x`** (the custom collector, #79), not
-  the stock exporter. The live `dspmq` output carries exactly the S13 fields (ROLE/QUORUM/INSYNC/
-  GRPROLE/BACKLOG/HASTATUS/SYNCTIME) — the golden-output seed for the metric contract.
+- **`ibmmq_nha_*` — CORRECTED (see Phase-0 doc §2).** The initial "none scraped" was an artifact of the
+  NHAUAPP exporter crash-looping on the #936 authz bug. Once fixed, the stock exporter emits **~40
+  `ibmmq_nha_*`** replica/recovery statistics — including `ibmmq_nha_recovery_backlog_bytes` (the CRR
+  lag / RPO trend) and `ibmmq_nha_backlog_bytes` (HA replica lag) — from the `NHAREPLICA` publication
+  class. So **Board 3 is a hybrid**: lag/throughput/latency *trends* from stock `ibmmq_nha_*`; only the
+  discrete *status* (ROLE / QUORUM / GRPROLE Live·Recovery / HASTATUS) needs the `dspmq -o nativeha`
+  collector (#79). The live `dspmq` output still carries the S13 status fields — the golden-output seed
+  for that collector's metric contract.
 
 **Coverage + security findings (motivate the observability-config phase, #173):**
 
