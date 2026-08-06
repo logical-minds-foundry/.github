@@ -390,6 +390,42 @@ it rests on. Items marked ⚠ need live-exporter `/metrics` verification before 
 
 ---
 
+## § Live-exporter verification (2026-08-06) — DATA
+
+Run against a live `nativeha-ubuntu` lab bring-up (the `SVCQM` and, after fixing an authz
+bug, the `NHAUAPP` `mq_prometheus` exporters, plus `dspmq -o nativeha -x` on the active
+instance). Resolves the ⚠ items flagged in the JUDGMENT section:
+
+- **put/get counter type — RESOLVED → use `rate()`.** `# TYPE` confirms `ibmmq_queue_mqget_count`,
+  `ibmmq_queue_mqput_mqput1_count`, `ibmmq_qmgr_interval_mqput_mqput1_total_count`, and
+  `ibmmq_qmgr_interval_destructive_get_total_count` are all **`counter`**. So `rate()` everywhere
+  — the reference dashboards' raw queue-level usage (E.7) is not what we want.
+- **depth% / oldest / uncommitted — CONFIRMED.** `ibmmq_queue_depth`, `ibmmq_queue_attribute_max_depth`,
+  `ibmmq_queue_oldest_message_age`, `ibmmq_queue_uncommitted_messages` all present as **gauges**.
+- **channel status — CONFIRMED gauges.** `ibmmq_channel_status` and `ibmmq_channel_status_squash`
+  are gauges → raw value + value-map (0/1/2 per E.6).
+- **backout count — NOT a stock series.** No `ibmmq_*backout*` metric exists → Board 2 backout must
+  come from **ES events**, not Prometheus.
+- **in-doubt — NOT a stock series.** No stock in-doubt metric → from CHSTATUS / **ES events**, not
+  Prometheus.
+- **`ibmmq_nha_*` — NONE scraped anywhere.** Confirms Board 3's role/quorum/**GRPROLE(Live/Recovery)**/
+  BACKLOG surface is available only via **`dspmq -o nativeha -x`** (the custom collector, #79), not
+  the stock exporter. The live `dspmq` output carries exactly the S13 fields (ROLE/QUORUM/INSYNC/
+  GRPROLE/BACKLOG/HASTATUS/SYNCTIME) — the golden-output seed for the metric contract.
+
+**Coverage + security findings (motivate the observability-config phase, #173):**
+
+- **We are under-collecting.** The `NHAUAPP` exporter served **~118 `ibmmq_*` series** vs `SVCQM`'s
+  **~3223**; `-ibmmq.useStatus`/`useObjectStatus` is **off** (so QSTATUS/CHSTATUS-derived series are
+  suppressed); `monitoredQueues`/`monitoredChannels` are `*,SYSTEM.*`; statistics/accounting is not
+  consumed. The board data set cannot be trusted complete until the exporter config is reviewed
+  top-down.
+- **Two security/authz bugs found and fixed** while verifying: `grafana-server` refused to start on
+  the default image-renderer token (#935); the `mqmon` least-privilege surface omitted the
+  command-queue + `$SYS`-topic authority the exporter needs, so the hardened Native HA exporter
+  crash-looped on MQRC 2035 (#936). The exporter's required authorities are undocumented upstream and
+  had to be pinned empirically — a full, documented grant model is part of #173.
+
 ## § Full source list (checkable)
 
 - S1 https://github.com/ibm-messaging/mq-metric-samples/blob/master/cmd/mq_prometheus/README.md

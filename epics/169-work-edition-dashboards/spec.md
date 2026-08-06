@@ -2,14 +2,17 @@
 
 - **Epic:** `logical-minds-foundry/.github#169`
 - **Design task:** `logical-minds-foundry/.github#170`
+- **Phase 0 child (gating):** `logical-minds-foundry/.github#173` — observability-config
+  verification & grant model (must complete before any panel work; §8)
 - **Depends on (external):** `logical-minds-foundry/.github#79` (observability / collector
   extraction — Wave 2), the **LogSearch project** (logs + events → Elasticsearch — Wave 1 ES
   switch)
 - **Related:** cockpit-dashboards-extraction-goal (#313), component-extraction-roadmap (#368),
-  dashboards-lead-with-time-series (#489/#521), collectors-stdlib-only-non-MQI (#79)
-- **Status:** design (brainstorm output); architecture approved, panel-level detail deferred to
-  a research → co-development phase
-- **Date:** 2026-08-05
+  dashboards-lead-with-time-series (#489/#521), collectors-stdlib-only-non-MQI (#79); the
+  Phase-0 fixes that surfaced during verification — grafana token (#935), exporter authz (#936)
+- **Status:** architecture approved; prior-art + live verification done; **Phase 0
+  (observability config, #173) is the next action and gates panel co-development**
+- **Date:** 2026-08-05 (updated 2026-08-06)
 
 ## 1. Problem & motivation
 
@@ -191,11 +194,12 @@ signal-in-the-noise showcase.
   · channel throughput · backout rate.
 - **④ Event/log feed** *(1b, ES)*: channel and performance events, severity-filtered.
 
-**Verification caveat:** several bindings — `maxdepth`/depth%, oldest-message-age, per-queue
-backout — must be verified against a live exporter's `/metrics` before commit. The
-`mq_prometheus` exporter does not export everything, and some signals may require exporter
-`monitoredQueues` config or a computed expression. Any signal not actually available will be
-flagged, never shipped as a silently-empty panel.
+**Verification — done (2026-08-06, live lab; see research brief §Live-exporter verification):**
+depth% inputs, oldest-message-age and uncommitted are present **gauges**; put/get and the
+qmgr-interval series are all **counters** (→ `rate()` everywhere); channel status/squash are
+gauges (raw + value-map). **Two signals are NOT stock series** — per-queue **backout** and
+**in-doubt** — so both come from the **ES event feed (Wave 1b)**, not Prometheus. The live run
+also showed the exporter is **under-collecting** (see §8 Phase 0).
 
 ### 7.3 Infrastructure / HA-DR view — Wave 2 (Native HA CRR only)
 
@@ -213,10 +217,22 @@ metric contract (§3.2) — no code import, just a diff.
 
 | Wave | Board(s) | Metrics | Logs/events | Prerequisite |
 |------|----------|---------|-------------|--------------|
-| **1a — now** | QM view · Queue/channel view (metric panels) | `ibmmq_*` (ready) | — | Prometheus schema note (§3.2) verified against work's exporter |
+| **0 — now (gating)** | *(no board)* observability-config verification & grant model (**#173**) | — | — | none — this **is** the foundation the boards stand on |
+| **1a — after 0** | QM view · Queue/channel view (metric panels) | `ibmmq_*` | — | Phase 0 complete + Prometheus schema note (§3.2) verified against work's exporter |
 | **1b — days** | QM · Queue/channel **ES event/log feed** | — | ES (built once, no Loki) | LogSearch (in parallel now, ~1–2 days) + ES doc/field contract |
 | **2 — next** | Infra / HA-DR (Native HA CRR) | `cluster_nha_*` / CRR collectors | ES event feed | collector extraction (#79) + prose-spec regen at work + golden-output diff |
 | **backlog** | RDQM / Pacemaker infra | — | — | work does not run these — future follow-on epic |
+
+**Phase 0 — observability-config verification & grant model (#173, gates the panels).** The
+live verification (2026-08-06) proved the exporter is *under-collecting* (~118 vs ~3223 series;
+`useStatus` off; limited `monitoredQueues`; no statistics/accounting), and surfaced two authz
+bugs that had to be fixed just to bring the exporter up (#935, #936). Building dashboards on a
+config we have not verified collects the right data would be building on sand — so before any
+panel work, Phase 0 reviews the `mq_prometheus` configuration **top-down** for maximum coverage
+of the data the boards need and produces a **complete, documented grant/permission model** (the
+exporter's authorities are undocumented upstream and had to be pinned empirically). Folded in
+from the former standalone seed **#173**, now a child of this epic and a hard prerequisite for
+Wave 1a.
 
 **External dependencies (not children of this epic):**
 
@@ -243,11 +259,11 @@ throwaway spike to feel out a layout. Rendered output carries no hardcoded UIDs 
 render target (e.g. `mqlab render --portable`) emits the work editions ready to email and
 import.
 
-## 10. Prior-art research — the immediate next action
+## 10. Research
 
-Before panel-level co-development, a **prior-art research pass** produces a cited research brief
-(data vs. judgment, checkable links) that seeds panel selection and is **committed into the epic
-docs** (per §3.1). Scope:
+**Part A — prior-art (DONE).** A cited prior-art pass produced the research brief
+(`research/prior-art.md`, sources S1–S25, DATA vs. judgment) and was augmented with the
+2026-08-06 live-exporter verification (§7.2). It covered:
 
 - The `mq_prometheus` / `mq-metric-samples` project's own **reference Grafana dashboards** — the
   most directly relevant prior art (identical exporter).
@@ -258,9 +274,16 @@ docs** (per §3.1). Scope:
 - **Common alerting rules** — DLQ > 0, queue-depth-high events, channel retry/stopped,
   in-doubt, oldest-message-age.
 
-## 11. Open questions (deferred to co-development)
+**Part B — observability-config verification (Phase 0, NEXT — the immediate action).** Prior-art
+told us *what* to monitor; Part B verifies the lab actually *publishes and secures* it. Reviews
+the `mq_prometheus` configuration top-down for maximum coverage (resource classes, `useStatus`,
+monitored patterns, statistics/accounting) and produces the complete, documented grant model.
+Tracked as **#173** (now a child of this epic, §8 Phase 0). Panel co-development does not start
+until Part B confirms the data set is complete and correctly secured.
+
+## 11. Open questions (deferred to co-development, after Phase 0)
 
 The exact metric set per board; channel-type scenarios and their signals; threshold values;
 which signals earn a status-band pill vs a trend vs an attention-table row; and the final ES
-doc/field and metric contracts. These are derived from the §10 research and co-developed
-interactively, not decided here.
+doc/field and metric contracts. These are derived from the §10 research **and the Phase 0
+config verification (#173)**, then co-developed interactively — not decided here.
