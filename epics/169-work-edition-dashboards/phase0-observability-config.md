@@ -68,8 +68,8 @@ exporter config unless noted; config keys per `mq-metric-samples/pkg/config/conf
 
 | Lever | Now | To maximize | Yields | Mechanism / reader | Keep / prune |
 |-------|-----|-------------|--------|--------------------|--------------|
-| **Accounting** `ACCTMQI`/`ACCTQ` | OFF | `ALTER QMGR ACCTMQI(ON) ACCTQ(ON)` **+ build an accounting collector** (exporter can't read the accounting queue — confirmed in source) | per-connection & per-queue MQI op counts/bytes/times by app/user | Mech. 3 → **NEW collector** | **keep** (grab-all; prune later if noisy) |
-| **Idle-queue visibility** | pub-driven | explicit `monitoredQueues` list of critical queues; verify QSTATUS actually covers idle ones | depth/oldest for a *backed-up-but-idle* queue | Mech. 1/2 → exporter | **investigate** (see §7) |
+| **Accounting** `ACCTMQI`/`ACCTQ` | OFF | `ALTER QMGR ACCTMQI(ON) ACCTQ(ON)` **+ build an accounting collector** (exporter can't read the accounting queue — confirmed in source) | per-connection & per-queue MQI op counts/bytes/times by app/user | Mech. 3 → **NEW collector** | **follow-on, skip for MVP** — statistics are Prometheus-native, accounting is not (dedicated add-on); not needed at the target employer now (filed as a separate task) |
+| **Queue coverage / idle visibility** | most queues invisible | grant `mqmon +dsp +inq` over the queue namespace (§3 key finding) | all queues incl. backed-up idle ones (`oldest_message_age` while idle) | Mech. 1/2 → exporter + authz | **RESOLVED** — it was authority, not activity |
 | **`EXTENDED` queue class** | excluded by default (`queueSubscriptionSelector`) | add `EXTENDED` | 9.4.2+ L2/L3 queue diagnostics (msg-search/examine/skip internals) | Mech. 1 → exporter | **keep** |
 | **`showInactiveChannels`** | `false` | `true` | defined-but-inactive / **stopped** channels (a dashboard-critical signal) | Mech. 2 → exporter | **keep** |
 | **Statistics *messages*** (`useStatistics`) | not consumed | `useStatistics=true` **or** an `amqsmon` collector | STATMQI/STATQ/STATCHL interval records | Mech. 3 | **likely prune** — overlaps the pubs the exporter already has; forces `monitoredQueues=*` |
@@ -77,13 +77,17 @@ exporter config unless noted; config keys per `mq-metric-samples/pkg/config/conf
 | **`MONCHL` level** | MEDIUM | `HIGH` | higher channel-status sampling rate | Mech. 2 → QM attr | **consider** (MONQ has no level distinction; MONCHL does) |
 | **AMQP / MQTT channels** | off | `monitoredAMQPChannels` / `monitoredMQTTChannels` | protocol channel status | Mech. 2 → exporter | **out of scope** — the lab does not use AMQP or MQTT and will not until a real-world need arises (decision 2026-08-06); leave off |
 
-**Key finding — per-queue coverage is publication-driven.** Despite `monitoredQueues *,SYSTEM.*` and
-`useStatus` forced on, **zero `SYSTEM.*` queues appear** in the exporter (including
-`SYSTEM.ADMIN.COMMAND.QUEUE`, which the exporter itself actively puts to). Only `APP.REPLY` and the
-exporter's own temp reply queues are present. So the wildcard does **not** guarantee a queue is
-collected — coverage follows STATQ publication/discovery, which is activity-influenced. A
-critical-but-idle queue could be **invisible**. This is the single most important item to resolve for
-dashboard trustworthiness (§7).
+**Key finding — coverage IS the security model (RESOLVED 2026-08-06).** Despite
+`monitoredQueues *,SYSTEM.*`, most queues were invisible — **because the least-privilege `mqmon`
+identity only held `+dsp` on `APP.REPLY`**; the exporter cannot inquire a queue it has no authority on.
+Proof: defining `TEST.IDLE.PROBE`, granting `mqmon +dsp +inq` via **`SET AUTHREC`**, and forcing
+rediscovery made it appear immediately (11 series) reporting `oldest_message_age` climbing while
+**idle** (67 s, no activity) — so `useStatus`/QSTATUS **does** cover idle-but-nonempty queues. It was
+*authority*, not publication-gating. **Grant `mqmon +dsp +inq` across the monitored queue namespace and
+every queue — including backed-up idle ones — is visible.** This is precisely the least-privilege
+**MQMon security profile** (§5) — the opposite of the industry "run the monitor as `mqm`" cop-out.
+Caveat: `rediscoverInterval` defaults to **1h**, so newly-created queues lag until rediscovery — lower
+it or accept it for stable topologies.
 
 ## 4. Sourcing note on the exporter's collection model
 
@@ -97,11 +101,19 @@ dashboard trustworthiness (§7).
 - `overrideCType=true` (default this major version) splits counters vs gauges correctly — consistent
   with the live `# TYPE` checks (put/get = counters → `rate()`).
 
-## 5. Least-privilege grant model (for maximal collection)
+## 5. The MQMon least-privilege security profile (a first-class deliverable)
 
-The exporter repo ships **no `setmqaut`** (whole-tree grep is empty); it documents only the *objects
-touched*. This model is pinned empirically (#936) + from the object list, per data source. Identity =
-`mqmon` (MON.SVRCONN → SSLPEERMAP).
+**The architectural stance:** the industry default is to run the monitor as `mqm` (superuser) and skip
+authority entirely — a cop-out that hands a monitoring tool full control of the queue manager it
+watches. This lab does it **right**: a scoped, documented, least-privilege identity (`mqmon`, mapped
+from `MON.SVRCONN` via SSLPEERMAP) with exactly the authorities the exporter needs and nothing more.
+The exporter repo ships **no `setmqaut`** at all (whole-tree grep is empty) — it documents only the
+*objects touched* — so this profile fills a real upstream gap and is a reusable, portable deliverable.
+
+**Expressed as `SET AUTHREC` (MQSC), not `setmqaut` (CLI):** they are equivalent, but `SET AUTHREC`
+runs **remotely** and lives **in the same templated MQSC as the object definitions**, so authority
+travels with the objects (rule, 2026-08-06). Model pinned empirically (#936, the §3 coverage test) +
+the object list, per data source:
 
 | Data source | Object | Authority | Confirmed |
 |-------------|--------|-----------|-----------|
@@ -109,7 +121,8 @@ touched*. This model is pinned empirically (#936) + from the object list, per da
 | Mech. 2 (PCF status/discovery) | `SYSTEM.ADMIN.COMMAND.QUEUE` | `+put` | #936 live |
 | Mech. 2 (PCF replies) | `SYSTEM.DEFAULT.MODEL.QUEUE` (or configured `replyQueue`) | `+dsp +inq +get` | #936 |
 | Mech. 1 (resource pubs) | `SYSTEM.ADMIN.TOPIC` (the `$SYS` tree) | `+sub` | #936 live (replaced the wrong `SYSTEM.BASE.TOPIC` placeholder) |
-| Mech. 1/2 (per-object) | each monitored queue/channel | `+dsp +inq` | partial |
+| Mech. 1/2 (per-queue) | monitored queue namespace (`SET AUTHREC PROFILE('**') OBJTYPE(QUEUE)`, or per-critical-queue) | `+dsp +inq` | **confirmed — this is the coverage gate (§3); without it a queue is invisible** |
+| Mech. 2 (channel status) | channels via the command server (PCF) | *covered by command-queue `+put`* — no per-channel authrec needed | live (4 channels visible without per-channel grants) |
 | Mech. 3 (statistics), *if* `useStatistics` | `SYSTEM.ADMIN.STATISTICS.QUEUE` | `+get` | to add |
 | Mech. 3 (accounting collector) | `SYSTEM.ADMIN.ACCOUNTING.QUEUE` | `+get` (the collector's own identity) | to add |
 
@@ -119,24 +132,33 @@ publications, `DEFPSIST(NO)`; **`USEDLQ(NO)` on `SYSTEM.ADMIN.TOPIC`** to avoid 
 
 ## 6. Open verification items → next steps
 
-1. **Idle-nonempty queue visibility (§3 key finding)** — definitive timed test: define a local queue,
-   `amqsput` N messages, leave it idle one publish+scrape interval, confirm whether it appears with
-   `depth=N`. If not, decide the fix (explicit per-queue `monitoredQueues`, or a QSTATUS-poll config).
-2. **Accounting collector design** — an `amqsmon`-based, non-MQI collector reading
-   `SYSTEM.ADMIN.ACCOUNTING.QUEUE` (the #79 pattern), plus the `ACCTMQI/ACCTQ` enablement. Likely a
-   follow-on task/epic.
+1. **Idle-queue visibility — RESOLVED (§3).** It was `mqmon` authority, not activity. `TEST.IDLE.PROBE`
+   granted via `SET AUTHREC` appeared with `oldest_message_age=67 s` while idle. Fix = the namespace
+   grant in §5/§7.
+2. **Accounting collector — deferred to a filed follow-on task.** An `amqsmon`-based non-MQI collector
+   reading `SYSTEM.ADMIN.ACCOUNTING.QUEUE` (the #79 pattern) + `ACCTMQI/ACCTQ` enablement. Not built in
+   the MVP.
 3. **Confirm live defaults Agent A could only source from older docs:** `STATINT`/`ACCTINT`=1800,
    `ACCTQ`=OFF, `STATACLS` default — `DISPLAY QMGR` on a 9.4 QM.
 4. **STATAPP** — requires a uniform cluster; out of scope for the Native HA topology.
 
 ## 7. Recommendations (feed #173 implementation)
 
-- **Enable in the exporter/QM config:** `EXTENDED` queue class; `showInactiveChannels=true`; consider
-  `MONCHL(HIGH)`. Cheap, high-value, no new components.
-- **Resolve idle-queue visibility** before trusting depth-based dashboard alerts (§6.1).
-- **Accounting:** enable `ACCTMQI/ACCTQ` and scope a dedicated accounting collector (follow-on).
-- **Ship the grant model (§5) as documented, cited config** — it is the portable security contract the
-  work handoff needs, and it fills a genuine upstream documentation gap.
+**Posture — open the fire hoses (lab), then dial back.** Enable everything collectible and observe;
+the worst case is a full disk, then we prune. Maximal coverage first, tuning second.
+
+- **Grant `mqmon` the monitored-queue namespace** (`SET AUTHREC PROFILE('**') OBJTYPE(QUEUE)
+  GROUP('mqmon') AUTHADD(DSP, INQ)`) — this is the **coverage fix** (§3) *and* the MQMon security
+  profile (§5) in one. Idle queues then appear; no `mqm` cop-out.
+- **Enable in the exporter/QM config:** `EXTENDED` queue class; `showInactiveChannels=true`;
+  `MONQ(HIGH)`/`MONCHL(HIGH)`/`STATCHL(HIGH)` (applied live 2026-08-06). Consider lowering
+  `rediscoverInterval` so new queues are picked up promptly.
+- **Accounting → follow-on, skipped for the MVP.** Statistics are Prometheus-native (the exporter
+  collects them); **accounting is not** — it needs a dedicated add-on collector (`amqsmon`, #79
+  pattern). It is not needed at the target employer now, so per minimal-MVP-complexity it is deferred
+  to a separate task (filed), not built here.
+- **Ship the MQMon security profile (§5) as templated `SET AUTHREC`** co-located with the object MQSC —
+  the portable, documented least-privilege contract; fills a genuine upstream gap.
 - **Prune later:** revisit `useStatistics` (redundant with pubs) and any high-cardinality series once
   live.
 
