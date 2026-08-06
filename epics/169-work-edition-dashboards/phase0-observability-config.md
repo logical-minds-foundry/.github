@@ -150,9 +150,17 @@ the worst case is a full disk, then we prune. Maximal coverage first, tuning sec
 - **Grant `mqmon` the monitored-queue namespace** (`SET AUTHREC PROFILE('**') OBJTYPE(QUEUE)
   GROUP('mqmon') AUTHADD(DSP, INQ)`) — this is the **coverage fix** (§3) *and* the MQMon security
   profile (§5) in one. Idle queues then appear; no `mqm` cop-out.
-- **Enable in the exporter/QM config:** `EXTENDED` queue class; `showInactiveChannels=true`;
-  `MONQ(HIGH)`/`MONCHL(HIGH)`/`STATCHL(HIGH)` (applied live 2026-08-06). Consider lowering
-  `rediscoverInterval` so new queues are picked up promptly.
+- **Adopt a YAML config file for the exporter (DECIDED 2026-08-06).** Migrate the `mq-exporter` role
+  from ExecStart CLI flags to a rendered `mq-exporter-<qm>.yaml`, with the unit invoking
+  `mq_prometheus -f <yaml>`. Rationale: (1) `EXTENDED` and the per-class filters have **no CLI flag**,
+  so YAML is the only clean way to reach them; (2) the fire-hose option explosion makes a stack of
+  `-ibmmq.*` flags unmanageable; (3) **work already runs a YAML config**, so the lab's config transfers
+  directly — the YAML becomes part of the **portable deliverable** alongside the dashboards JSON and the
+  grant contract. The launcher (systemd on `mon-probe` vs an MQ `SERVICE` object) is orthogonal; stays
+  systemd for the off-cluster client-mode exporter.
+- **Enable in that YAML / QM config:** `EXTENDED` queue class; `showInactiveChannels=true`;
+  `MONQ(HIGH)`/`MONCHL(HIGH)`/`STATCHL(HIGH)` (applied live 2026-08-06); lower `rediscoverInterval` so
+  new queues are picked up promptly.
 - **Accounting → follow-on, skipped for the MVP.** Statistics are Prometheus-native (the exporter
   collects them); **accounting is not** — it needs a dedicated add-on collector (`amqsmon`, #79
   pattern). It is not needed at the target employer now, so per minimal-MVP-complexity it is deferred
