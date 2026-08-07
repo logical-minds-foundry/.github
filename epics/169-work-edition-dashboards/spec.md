@@ -2,8 +2,9 @@
 
 - **Epic:** `logical-minds-foundry/.github#169`
 - **Design task:** `logical-minds-foundry/.github#170`
-- **Phase 0 child (gating):** `logical-minds-foundry/.github#173` — observability-config
-  verification & grant model (must complete before any panel work; §8)
+- **Phase 0 child (COMPLETE):** `logical-minds-foundry/.github#173` — observability-config
+  verification & grant model; delivered by #943/#944 and live-verified on a full cold rebuild
+  (§8). The exporter now publishes the full catalog the boards bind to.
 - **Depends on (external):** `logical-minds-foundry/.github#79` (observability / collector
   extraction — Wave 2), the **LogSearch project** (logs + events → Elasticsearch — Wave 1 ES
   switch)
@@ -11,8 +12,9 @@
   dashboards-lead-with-time-series (#489/#521), collectors-stdlib-only-non-MQI (#79); the
   Phase-0 fixes that surfaced during verification — grafana token (#935), exporter authz (#936)
 - **Status:** architecture approved; prior-art + live verification done; **Phase 0
-  (observability config, #173) is the next action and gates panel co-development**
-- **Date:** 2026-08-05 (updated 2026-08-06)
+  (observability config, #173) COMPLETE — exporter verified live at 3172 series / 238 metric
+  names / 49 queues (was ~118); Wave 1a panel co-development is the next action**
+- **Date:** 2026-08-05 (updated 2026-08-07)
 
 ## 1. Problem & motivation
 
@@ -83,6 +85,11 @@ carried to work. Nothing hardcodes a datasource UID, a QM name, or an undocument
   a one-time verified check at work (import → confirm `$qmgr` populates → done) and gives a
   concrete list to sanity-check against work's exporter before the JSON is even emailed. Panels
   reference a `$datasource` variable; the per-site difference is which Prometheus the user picks.
+  **Phase 0 (#173) produced this note's backing data:** the verified live catalog — 238
+  `ibmmq_*` metric names spanning the qmgr / queue / channel / `nha` classes, under the fire-hose
+  config (EXTENDED queue class, `useObjectStatus`, wildcard `monitoredQueues`, the MQMon
+  namespace grant) — captured in `phase0-observability-config.md`. The schema note is now a
+  concrete, checkable list rather than a promise.
 - **Metric contract** (Infra board) — exact metric names, labels, source CLI commands
   (`dspmq -o nativeha` and the CRR status commands), parsing rules, and output format for the
   `cluster_nha_*` / CRR link·lag·role signals. Produced by the collector extraction (#79) and
@@ -92,7 +99,12 @@ carried to work. Nothing hardcodes a datasource UID, a QM name, or an undocument
   regenerated work collector can be **diffed against the golden block**: match = faithful,
   mismatch = caught *before* the infra board is trusted. This is the cheapest fidelity gate that
   survives the no-code-import constraint and honours the "never ship a silently-empty panel"
-  stance (§6). The board's PromQL binds to these names.
+  stance (§6). The board's PromQL binds to these names. **Naming is the central portability risk
+  for this board:** there is no standard for Native HA / CRR collector metric names — each
+  implementation picks its own — so the board binds to the **lab collector's names** and
+  **translates in-board** for the first iterations, converging later via either a namespace
+  agreed with the work operators or this documented contract. The contract's job is to make that
+  reconciliation a diff, not a guess.
 - **ES doc/field contract** (logs + events) — index/data-stream name and the field names the
   panels query (`@timestamp`, `severity`, `qmgr`, `object`, `reason_code`, `message`). Produced
   by the LogSearch project. The board's Lucene queries bind to it.
@@ -211,36 +223,43 @@ only**; RDQM and Pacemaker/DRBD are out of scope (§2). A coworker has already e
 Native HA CRR data at work, which is a starting point for the collector's prose contract.
 Replica/component state uses the same **Attention + Inventory** pair (§6.4). Fidelity of the
 work-regenerated collector is verified against the **golden sample output** shipped with the
-metric contract (§3.2) — no code import, just a diff.
+metric contract (§3.2) — no code import, just a diff. Board work can begin **now** against the
+embedded lab collector's live metrics; the exact metric names (non-standard across
+implementations) are translated in-board initially and converge via the §3.2 naming contract.
+Extraction (#79) is the *completion* gate, not a prerequisite to start.
 
 ## 8. Wave phasing & dependency graph
 
 | Wave | Board(s) | Metrics | Logs/events | Prerequisite |
 |------|----------|---------|-------------|--------------|
-| **0 — now (gating)** | *(no board)* observability-config verification & grant model (**#173**) | — | — | none — this **is** the foundation the boards stand on |
+| **0 — DONE** | *(no board)* observability-config verification & grant model (**#173**, delivered by #943/#944) | — | — | complete — the verified foundation the boards stand on |
 | **1a — after 0** | QM view · Queue/channel view (metric panels) | `ibmmq_*` | — | Phase 0 complete + Prometheus schema note (§3.2) verified against work's exporter |
 | **1b — days** | QM · Queue/channel **ES event/log feed** | — | ES (built once, no Loki) | LogSearch (in parallel now, ~1–2 days) + ES doc/field contract |
-| **2 — next** | Infra / HA-DR (Native HA CRR) | `cluster_nha_*` / CRR collectors | ES event feed | collector extraction (#79) + prose-spec regen at work + golden-output diff |
+| **2 — startable now** | Infra / HA-DR (Native HA CRR) | embedded-collector CRR metrics (live in the lab now) | ES event feed | **startable against the embedded collector's live metrics**; extraction (#79) + the metric-name contract gate *completion*, not start |
 | **backlog** | RDQM / Pacemaker infra | — | — | work does not run these — future follow-on epic |
 
-**Phase 0 — observability-config verification & grant model (#173, gates the panels).** The
-live verification (2026-08-06) proved the exporter is *under-collecting* (~118 vs ~3223 series;
-`useStatus` off; limited `monitoredQueues`; no statistics/accounting), and surfaced two authz
-bugs that had to be fixed just to bring the exporter up (#935, #936). Building dashboards on a
-config we have not verified collects the right data would be building on sand — so before any
-panel work, Phase 0 reviews the `mq_prometheus` configuration **top-down** for maximum coverage
-of the data the boards need and produces a **complete, documented grant/permission model** (the
-exporter's authorities are undocumented upstream and had to be pinned empirically). Folded in
-from the former standalone seed **#173**, now a child of this epic and a hard prerequisite for
-Wave 1a.
+**Phase 0 — observability-config verification & grant model (#173, COMPLETE).** The initial
+verification (2026-08-06) proved the exporter was *under-collecting* (~118 series; `useStatus`
+off; limited `monitoredQueues`) and surfaced two authz bugs (#935, #936). Phase 0 then reviewed
+the `mq_prometheus` configuration **top-down** and delivered, via **#943/#944**: the QM
+fire-hose (`MON*(HIGH)`/`STATCHL(HIGH)`), the MQMon least-privilege grant model as MQSC
+`SET AUTHREC` (documenting the previously-undocumented permission set), and the exporter YAML
+migration enabling the EXTENDED queue class. **Live-verified on a full cold rebuild (2026-08-07):
+452 → 3172 series, 4 → 49 queues (45 `SYSTEM.*`), EXTENDED class publishing.** In hindsight this
+was effectively its own epic that got folded in here — captured as a lesson in the #171
+retrospective — but either way it is now the verified foundation Wave 1a builds on.
 
 **External dependencies (not children of this epic):**
 
-- **LogSearch project** (in parallel now, ~1–2 days) — ships lab logs + MQ events to
-  Elasticsearch and defines the ES doc/field contract. Unblocks **Wave 1b**.
-- **Collector extraction** (#79, `mq-resiliency-observability`) — finish extracting the HA/DR
-  collectors into a standalone, exportable form and produce the metric contract. The Wave-2
-  infra-board tasks are `Blocked-by` this landing.
+- **LogSearch project** (**imminent** — code done + deployed; in cold-boot/sanity wrap-up) —
+  ships lab logs + MQ events to Elasticsearch and defines the ES doc/field contract. Unblocks
+  **Wave 1b**, which is high-priority: work standardizes on Elasticsearch, so the ES form is what
+  makes the prototypes work-relevant (the reason work adoption was held until it lands).
+- **Collector extraction** (#79, `mq-resiliency-observability`) — the HA/DR collectors already
+  run **embedded in the lab and publish their metrics live**, so Wave-2 board work can *start*
+  against them now. Extraction into a standalone, exportable form + the documented metric
+  contract is the **completion** gate (portability + the naming reconciliation, §3.2), not a
+  start gate.
 - **Corporate-policy hand-off** — code cannot be imported at work, so the collector's real
   deliverable is a **detailed prose spec in Markdown** precise enough that Claude-at-work
   regenerates a faithful collector `.py` from it alone. The CLI collectors are simple (they
@@ -274,12 +293,12 @@ import.
 - **Common alerting rules** — DLQ > 0, queue-depth-high events, channel retry/stopped,
   in-doubt, oldest-message-age.
 
-**Part B — observability-config verification (Phase 0, NEXT — the immediate action).** Prior-art
-told us *what* to monitor; Part B verifies the lab actually *publishes and secures* it. Reviews
-the `mq_prometheus` configuration top-down for maximum coverage (resource classes, `useStatus`,
-monitored patterns, statistics/accounting) and produces the complete, documented grant model.
-Tracked as **#173** (now a child of this epic, §8 Phase 0). Panel co-development does not start
-until Part B confirms the data set is complete and correctly secured.
+**Part B — observability-config verification (Phase 0, COMPLETE).** Prior-art told us *what* to
+monitor; Part B verified the lab actually *publishes and secures* it. It reviewed the
+`mq_prometheus` configuration top-down for maximum coverage and produced the complete,
+documented grant model, delivered via **#943/#944** and live-verified on a cold rebuild (§8).
+The data set is confirmed complete and correctly secured, so Wave 1a panel co-development can
+begin.
 
 ## 11. Open questions (deferred to co-development, after Phase 0)
 
