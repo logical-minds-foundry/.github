@@ -108,7 +108,13 @@ A small helper computes this; the guest-enumerating phases consume it.
 | `net` | **unchanged** — all lab networks up (CPU-free) |
 | `vms` | bring up **effective (site-A) members only** → 6 QM guests become 3 |
 | `provision` | pass `-e dr_enabled=false` to the stack's provision playbook |
-| `observe` | instrument **effective members only** |
+| `observe` | instrument **effective members only** (see note) |
+
+> **Observe `--limit` is load-bearing.** `observability.yml` keys instrumentation on
+> `nha_ubuntu_a`/`nha_ubuntu_b` group membership, so the `observe` phase's `--limit` must be the
+> **effective** members (site-A) — otherwise it targets absent site-B nodes and fails
+> `UNREACHABLE`. The per-host group checks in that playbook are then simply false for the
+> site-A hosts, which is correct.
 
 ### 3.4 Provision gating — `dr_enabled`
 
@@ -134,6 +140,17 @@ The preflight probes only `nha_ubuntu_a[0]` (site-A), so it is untouched.
 that does not honour it — which would bring up site-A guests but then fail provisioning against
 an absent site-B. The `dr_groups` marker and the playbook gate are declared together per stack;
 their joint presence is what makes a stack `--no-dr`-capable.
+
+### 3.6 Composition with `--from` / `--only`
+
+`--no-dr` shapes only the phases it actually runs, and **never tears down guests**: `vms`
+excludes the site-B guests, `provision` skips the DR half, `observe` limits to the effective
+members. A phase skipped by `--from`/`--only` simply gets no site-B shaping — e.g.
+`bootstrap <stack> --no-dr --from provision` provisions HA-only but does **not** touch a
+site-B that some earlier full bootstrap left running. Removing an orphaned site-B is
+`teardown`'s job, not `--no-dr`'s. This keeps `--no-dr` honestly scoped to "do not bring the
+DR site *up*," consistent with the stateless design (§2), and avoids bolting teardown
+behaviour onto a bring-up flag.
 
 ## 4. Scope & waves
 
