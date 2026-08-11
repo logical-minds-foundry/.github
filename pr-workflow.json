@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "issue": "192",
+  "branch": "feature/192-log-lifecycle-ubuntu-docs",
+  "base": "origin/develop",
+  "status": "ready",
+  "created_at": "2026-08-11T14:05:25Z",
+  "updated_at": "2026-08-11T14:05:25Z",
+  "git": {
+    "base_sha": "44a0058b87934c038d1d1691736e727c6876cc1c",
+    "head_sha": "15af61d36ffb0d9d53f2f2885ab5aeb007a0deb1"
+  },
+  "pr_metadata": {
+    "title": "docs(epic): spec + plan \u2014 Native HA log-lifecycle observability (Ubuntu arm)",
+    "summary": "Spec + plan for epic #191 (follow-up to #145): prove the log-lifecycle observability on the Ubuntu Native HA arm and generalize the one RHEL-hard-scoped validation playbook. Publishes epics/191-log-lifecycle-ubuntu-arm/.",
+    "notes": "Core code is already OS-generic (verified). Scope: one code task (parameterize the validation playbook host-group + QM with RHEL defaults preserved, plus trivial cleanups) and two validation gates (cold-rebuild + live-lab on nativeha-ubuntu). vrg-validate PASS.",
+    "linkage": "Closes"
+  },
+  "submitted": null
+}
