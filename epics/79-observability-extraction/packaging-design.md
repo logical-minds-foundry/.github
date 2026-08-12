@@ -73,7 +73,7 @@ mapped by the #81 follow-on brainstorm.
 
 ## 5. File structure & the one real per-format divergence
 
-```
+```text
 packaging/
   nfpm.yaml            # format-agnostic core: contents (files->install paths),
                        # deps, metadata (maintainer, MIT, version from the tag),

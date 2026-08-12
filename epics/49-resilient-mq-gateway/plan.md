@@ -33,10 +33,12 @@
 Stand up the independent, Vergil-managed repo whose sessions run inside the existing lab VM.
 
 **Files (new repo):**
+
 - Create: `vergil.toml` (declare the `[vm]` dependency on the lab VM — the proven cross-VM config), `README.md`, `CLAUDE.md` (repo guidance + the anonymization + parasite rules), `.gitignore` (covers `build/`, `*.env`, `secrets/`).
 - Create: `MEMORY.md` (policy header via the memory-init convention).
 
 **Interfaces:**
+
 - Produces: a working repo whose `vrg-container-run -- vrg-validate` passes empty, and whose cloud session opens **inside the lab VM** (shares the lab's running QM network).
 
 - [ ] **Step 1: Confirm the repo name** with the human (working name `mq-gateway-replay-lab`); create the GitHub repo in `logical-minds-foundry` and the Vergil profile.
@@ -51,9 +53,11 @@ Stand up the independent, Vergil-managed repo whose sessions run inside the exis
 Idempotent Ansible that adds **only the experiment's** queues to the live queue manager and counterparty, and declares-and-verifies everything it doesn't own.
 
 **Files (new repo):**
+
 - Create: `ansible/site.yml`, `ansible/roles/gw-queues/tasks/main.yml`, `ansible/roles/gw-queues/vars/main.yml` (queue names, all invented/generic), `ansible/inventory/lab.yml` (points at the lab's running QM host).
 
 **Interfaces:**
+
 - Consumes: the lab's running QM (by hostname/QM name, passed as vars — never hardcoded).
 - Produces (MQSC on the live QM, all app-owned, generic names): `GW.CPB.SEND` (remote-queue def → counterparty), `GW.CPB.SEND.ARCHIVE` (outbound archive, `DEFPSIST(YES)`), `GW.CPB.REPLY` (local reply queue), `GW.CPB.REPLY.ARCHIVE` (inbound archive). Later tasks open these by name.
 
@@ -70,9 +74,11 @@ Idempotent Ansible that adds **only the experiment's** queues to the live queue 
 A small CLI (start-of-day / run / end-of-day) and the process skeletons — **not** `mqlab`, **not** the `validate` framework.
 
 **Files (new repo):**
+
 - Create: `src/gwlab/__init__.py`, `src/gwlab/cli.py` (subcommands `start-of-day`, `run`, `end-of-day`), `src/gwlab/mqi.py` (thin pymqi helpers: connect, put-syncpoint, get-syncpoint, browse, commit), `src/gwlab/config.py` (queue names from one source), `tests/test_cli.py`, `pyproject.toml`.
 
 **Interfaces:**
+
 - Produces: `gwlab start-of-day|run|end-of-day` entrypoints; `gwlab.mqi` helpers consumed by Tracks B/C. `mqi.put_syncpoint(qname, msgdata, msgid=None) -> bytes(msgid)`, `mqi.get_syncpoint(qname, wait_ms) -> Message`, `mqi.browse(qname) -> Iterator[Message]`, `mqi.commit()`, `mqi.backout()`.
 
 - [ ] **Step 1: Write the failing test** for `cli` argument routing (`start-of-day`/`run`/`end-of-day` dispatch to named handlers) — `tests/test_cli.py`.
@@ -91,9 +97,11 @@ A small CLI (start-of-day / run / end-of-day) and the process skeletons — **no
 Prove the load-bearing mechanism on the live QM before building the demo on it.
 
 **Files (new repo):**
+
 - Create: `spikes/msgid_uow/spike.py`, `spikes/msgid_uow/FINDINGS.md`.
 
 **Interfaces:**
+
 - Produces: a decided mechanism — **(a)** gateway-assigned `MsgId` (app sets `MQMD.MsgId`, no `MQPMO_NEW_MSG_ID`), or **(b)** QM-generated read back from `MQMD` after the first `MQPUT` (pre-commit) — recorded in `FINDINGS.md` and consumed by Task C1.
 
 - [ ] **Step 1: Confirm against IBM Docs 9.4** (`ibm_doc_cache.py`) that `MQPUT` returns the resolved `MsgId` in `MQMD` **before** `MQCMIT`, and that an app may supply its own `MsgId` (interaction with `MQPMO_NEW_MSG_ID`).
@@ -109,9 +117,11 @@ Prove the load-bearing mechanism on the live QM before building the demo on it.
 Confirm the reconciliation key: that a reply carries `CorrelId` = the request's `MsgId`.
 
 **Files (new repo):**
+
 - Create: `spikes/correlid_echo/spike.py`, append to `spikes/.../FINDINGS.md`.
 
 **Interfaces:**
+
 - Produces: confirmation (or refutation) that `reply.CorrelId == request.MsgId` for this path — recorded for Task C3's reconciliation. If refuted, the fallback (parse the app body) is noted as a *cost*, not a blocker (spec §6/§11 Q7).
 
 - [ ] **Step 1: Confirm the request-reply `CorrelId`/`MsgId` convention against IBM Docs 9.4** and against how the counterparty simulator replies.
@@ -127,9 +137,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C1: Outbound path — atomic two-put producer with preserved MsgId
 
 **Files (new repo):**
+
 - Create: `src/gwlab/outbound.py`, `tests/test_outbound.py`. Modify: `src/gwlab/cli.py` (`run` wires the producer).
 
 **Interfaces:**
+
 - Consumes: `gwlab.mqi`, B1's chosen MsgId mechanism.
 - Produces: `outbound.send(trade) -> msgid` — one UOW PUT to `GW.CPB.SEND` + `GW.CPB.SEND.ARCHIVE`, same MsgId, `MQCMIT`. `run` drives dummy trades in batches at a configurable rate.
 
@@ -143,9 +155,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C2: Inbound path — responder + mirrored archive + drop injection
 
 **Files (new repo):**
+
 - Create: `src/gwlab/responder.py` (the dummy counterparty-facing app / "client"), `src/gwlab/inbound.py` (gateway get→archive), `tests/test_inbound.py`. Modify: `cli.py`.
 
 **Interfaces:**
+
 - Consumes: `gwlab.mqi`, C1's MsgId scheme, B2's echo finding.
 - Produces: `inbound.drain()` — destructive GET on `GW.CPB.REPLY` under syncpoint + PUT copy to `GW.CPB.REPLY.ARCHIVE` in the **same UOW** + `MQCMIT`. `responder.run(drop_rate)` consumes transmitted messages and replies with `CorrelId=request.MsgId`, **dropping a configurable fraction** (the injected missing-confirmation).
 
@@ -159,9 +173,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C3: Reconciliation-by-browse — the unconfirmed set
 
 **Files (new repo):**
+
 - Create: `src/gwlab/reconcile.py`, `tests/test_reconcile.py`.
 
 **Interfaces:**
+
 - Consumes: `gwlab.mqi.browse`, B2's key.
 - Produces: `reconcile.unconfirmed() -> list[Unconfirmed]` — browse `GW.CPB.SEND.ARCHIVE` and `GW.CPB.REPLY.ARCHIVE`, match outbound `MsgId` against reply `CorrelId` (header path; body-parse fallback per B2), return the unmatched with age. Browses **archives only** — never the live queues. Also `reconcile.metrics()` for the exporter (counts, oldest-age).
 
@@ -175,9 +191,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C4: Observability — extend the messaging-flow board with the archive panels
 
 **Files (new repo):**
+
 - Create: `src/gwlab/exporter.py` (expose `reconcile.metrics()` as Prometheus text or push to the lab's metrics tier by declared contract), `dashboards/gw-counterparty.json` (Grafana panels), `dashboards/README.md`.
 
 **Interfaces:**
+
 - Consumes: `reconcile.metrics()`.
 - Produces: a **panel set added to the existing messaging-flow board** (not a standalone board): unconfirmed-backlog-over-day (hero), send-vs-confirm rate, unconfirmed-set table — **per counterparty**, QM name/counterparty as variables from one source. The published mockup (`https://claude.ai/code/artifact/e2a3f94e-100a-48c1-ada0-6fd2620acf50`) is the design reference.
 
@@ -191,9 +209,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C5: Start-of-day / end-of-day clearing
 
 **Files (new repo):**
+
 - Modify: `src/gwlab/cli.py` (`start-of-day`, `end-of-day` handlers), `src/gwlab/dayboundary.py`; Create: `tests/test_dayboundary.py`.
 
 **Interfaces:**
+
 - Produces: `dayboundary.clear_archives()` — empties `*.ARCHIVE` queues (the intraday retention model, spec §R12); `start-of-day` asserts empty, `end-of-day` clears after a reconciliation check (refuse to clear if unconfirmed>0 unless `--force`, and say why).
 
 - [ ] **Step 1: Write the failing test** — `end-of-day` refuses when the unconfirmed set is non-empty (loud message), clears when empty or `--force`.
@@ -206,9 +226,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 ### Task C6: The demonstration — induce, observe, quantify
 
 **Files (new repo):**
+
 - Create: `demo/run_demo.md` (runbook), `demo/scenario.py` (orchestrates a scripted business day at accelerated time).
 
 **Interfaces:**
+
 - Consumes: the whole Track-C stack.
 - Produces: a repeatable scripted run — SOD clear → batches flowing (`drop_rate=0`, backlog flat) → **inject the reply stall** mid-run → backlog climbs, the unconfirmed set populates, the board shows it live → reconcile lists exactly which messages → **replay (C7) resends them, the counterparty dedups, backlog drains to zero** → EOD clear.
 
@@ -224,9 +246,11 @@ Confirm the reconciliation key: that a reply carries `CorrelId` = the request's 
 The other half of "replay the unconfirmed": resend them, and prove the resend is **delivered once**.
 
 **Files (new repo):**
+
 - Create: `src/gwlab/replay.py`, `tests/test_replay.py`. Modify: `src/gwlab/responder.py` (dedup on MsgId), `src/gwlab/cli.py` (`replay` subcommand).
 
 **Interfaces:**
+
 - Consumes: `reconcile.unconfirmed()` (C3), `outbound.send` (C1), `responder` (C2).
 - Produces: `replay.resend(unconfirmed) -> count` — resends each unconfirmed message through the outbound two-put **reusing its original MsgId** (so the resend is identifiable and the counterparty can dedup). `responder` gains a **seen-MsgId set** so a replayed message is **delivered once** (I2), with the dedup horizon = intraday (matching R12).
 
@@ -244,9 +268,11 @@ The other half of "replay the unconfirmed": resend them, and prove the resend is
 ### Task D1: MQ-native mechanisms report
 
 **Files (`.github`):**
+
 - Create: `epics/49-resilient-mq-gateway/research/mq-native-archive.md`.
 
 **Interfaces:**
+
 - Produces: a cited report (IBM Docs 9.4 via `ibm_doc_cache.py`) covering: the two-put mechanism; **streaming queues** (why deliberately not used; whether a copy can come off a transmission queue); **COA/COD** reports (MQ-level vs business confirmation); persistent messaging/logging; **native dedup feasibility without exits** (spec §8, §11 Q12); and a one-line "adjacent paths only if already operated" note (Kafka/FIX/Chronicle — no endorsement).
 
 - [ ] **Step 1: Fetch and cache** the relevant IBM Docs 9.4 pages.
@@ -264,9 +290,11 @@ The other half of "replay the unconfirmed": resend them, and prove the resend is
 Optional deeper arm (spec §12): stand up a minimal Rung-0-style gateway (local log + async copy to an "alternate log host", manual restart) and reproduce **host loss with an un-shipped log entry** → a message sent but unrecoverable — contrasted directly with the MQ-native option holding.
 
 **Files (new repo):**
+
 - Create: `rung0/async_log_gateway.py`, `rung0/DEMO.md`.
 
 **Interfaces:**
+
 - Produces: a scripted fault (kill the host between send and log-ship) that leaves a sent-but-unrecorded message; the reconciliation cannot see it — the concrete silent-loss the spec argues.
 
 - [ ] **Step 1: Implement the minimal async-log gateway** (single writer, async copy, no quorum).

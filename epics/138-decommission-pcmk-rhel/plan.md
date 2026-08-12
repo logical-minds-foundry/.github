@@ -35,7 +35,7 @@ YAML lab topology; Ansible roles/playbooks; libvirt/Vagrant lab.
 
 ## Task dependency graph
 
-```
+```text
   T1 code decommission (#794, mq-resiliency-lab-for-linux)
        │  merged
        ▼
@@ -52,6 +52,7 @@ YAML lab topology; Ansible roles/playbooks; libvirt/Vagrant lab.
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `src/mqlab/parity.py` (drop the `pcmk-rhel` MATRIX entry + its comment)
 - Modify: `tests/test_parity.py` (drop the pcmk-rhel test + header/ARMS assertions)
 - Modify: `lab/topology.yaml` (remove the arm block L255–276, the groups L367–368,
@@ -64,6 +65,7 @@ YAML lab topology; Ansible roles/playbooks; libvirt/Vagrant lab.
   `ansible/bake-mq-rdqm.yml:25-27`, `ansible/roles/alloy/tasks/install.yml:23`
 
 **Interfaces:**
+
 - Consumes: nothing from other tasks.
 - Produces: a lab with no `pcmk-rhel` arm; `parity.MATRIX` has five arms → four;
   `parity.render_markdown()` header auto-drops the column (it is `list(MATRIX)`-driven).
@@ -80,7 +82,7 @@ YAML lab topology; Ansible roles/playbooks; libvirt/Vagrant lab.
   → FAIL (the header still contains `pcmk-rhel` because `MATRIX` still has it).
 
 - [ ] **Step 3: Remove pcmk-rhel from the parity matrix** — in `src/mqlab/parity.py`
-  delete the line `    "pcmk-rhel": dict.fromkeys(VERBS, Support.NOT_YET),` from
+  delete the line `"pcmk-rhel": dict.fromkeys(VERBS, Support.NOT_YET),` from
   `MATRIX`, and drop the now-stale `pcmk-rhel (issue #238) is …` clause from the
   preceding comment block (keep the `rdqm-rhel` / `nativeha-rhel` notes intact).
 
@@ -132,11 +134,13 @@ YAML lab topology; Ansible roles/playbooks; libvirt/Vagrant lab.
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux` · **Runs after T1 merges.**
 
 **Files:**
+
 - Modify: `README.md:34` (the RHEL box/subscription note)
 - Modify: `docs/development/box-model.md:65` (the not-yet-baked RHEL arms note)
 - Modify: `docs/development/box-bake-manifest.md:219` (the pcmk-rhel bake note)
 
 **Interfaces:**
+
 - Consumes: the merged T1 removal (the arm no longer exists in code).
 - Produces: living docs with no `pcmk-rhel` arm; the epic's closing bookend.
 
@@ -184,6 +188,7 @@ and closes the epic. The human reviews and submits that PR.
 ## Self-Review
 
 **Spec coverage:**
+
 - D1 surgical/pcmk-rhel-exclusive removal → T1 Steps 5–8 (topology/ansible),
   Steps 1–4 (parity); the shared roles retained, RHEL variants removed
   (Debian-only) → Step 7. ✓

@@ -39,7 +39,7 @@ exists nowhere as a tested artifact — only as that footnote.
 
 ## 2. Goals & non-goals
 
-**Goals**
+### Goals
 
 1. Make the **file** sink a first-class, **tested** path in the `mq-event-monitor`
    role, selected by a role variable.

@@ -12,7 +12,7 @@ reference (what the data is, how to parse it, does it survive syslog) and a
 **generate-side** reference (how to force one event of each class) — plus the
 captured fixtures behind them.
 
-**Work delivered**
+### Work delivered
 
 | PR | What it did |
 |---|---|
@@ -37,8 +37,7 @@ captured fixtures behind them.
 **It began by being paused.** #110 was created before its own foundation existed:
 you cannot document *working with* the event feed until the feed is flowing
 everywhere. So at kickoff the epic was parked to stand up **#114 — event
-monitoring as a de-facto standard on every queue manager**. #110 resumed only once
-#114's rollout put `amqsevt -o json_compact` on every QM, which is also what made
+monitoring as a de-facto standard on every queue manager**. #110 resumed only once #114's rollout put `amqsevt -o json_compact` on every QM, which is also what made
 "capture a real event of each class from any arm" a trivial precondition rather
 than a bespoke setup.
 
@@ -46,8 +45,7 @@ than a bespoke setup.
 task (#780) **without seeing the epic's existing T1/T2/T3 plan** (#712/#713/#714) —
 the parent-issue search returned empty and the tasks were missed. #780 duplicated
 T2 (#713). It was then **submitted and merged (#790) prematurely**, against the
-agent's own recommendation to hold. Rather than revert, we **worked around it**:
-#790 became the Report A base, and #791 completed the plan *on top of it* — the T1
+agent's own recommendation to hold. Rather than revert, we **worked around it**: #790 became the Report A base, and #791 completed the plan *on top of it* — the T1
 fixtures, the syslog-fidelity retrofit into Report A (§8), Report B, and the docs
 cross-link — then #713 was reconciled and closed as the duplicate.
 

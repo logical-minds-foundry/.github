@@ -26,9 +26,11 @@
 De-risks every downstream task. Investigation task; deliverable is an engineering note, not code. **Its findings are applied forward** and can adjust Tasks 2–4.
 
 **Files:**
+
 - Create: `docs/reports/YYYY-MM-DD-nativeha-log-lifecycle-spike.md`
 
 **Produces (consumed by Tasks 2–4):**
+
 - **S1** — whether `ALTER QMGR LOGGEREV(ENABLED)` returns `AMQ8005I` on a replicated-log QM (Task 2 depends on this).
 - **S2** — the exact logger events that fire under automatic log management and the extent watermarks they carry (Task 3/4 event element).
 - **S3** — which log-health signals are pollable without MQI (filesystem extent naming/counts, `du`/`df` targets) vs. only via the event stream (Task 3 collector scope; Task 4 media-image element).
@@ -93,6 +95,7 @@ git commit -m "docs(report): Native HA log-lifecycle spike — S1-S4 findings (#
 ### Task 2: Log-type-aware `LOGGEREV` (declare-and-verify)
 
 **Files:**
+
 - Modify: `ansible/roles/mq-event-monitor/tasks/service.yml:13-30` (the #721 note + the `ALTER QMGR` step)
 - Modify: `ansible/roles/mq-event-monitor/defaults/main.yml` (default `mq_log_type: circular`)
 - Modify: `ansible/site-nativeha.yml` and `ansible/site-nativeha-ubuntu.yml` (declare `mq_log_type: replicated` where `mq-event-monitor` is included, ~L102-105)
@@ -103,6 +106,7 @@ git commit -m "docs(report): Native HA log-lifecycle spike — S1-S4 findings (#
 - [ ] **Step 1: Add the declared default (safe default = circular)**
 
 In `defaults/main.yml`:
+
 ```yaml
 # Log type this arm's QM runs. Native HA arms override to 'replicated' (a linear-
 # equivalent log, per IBM); everything else is circular. Drives LOGGEREV, which is
@@ -113,6 +117,7 @@ mq_log_type: circular
 - [ ] **Step 2: Declare `replicated` on the Native HA plays**
 
 In `site-nativeha.yml` / `site-nativeha-ubuntu.yml`, at the `include_role: mq-event-monitor` block:
+
 ```yaml
       vars:
         qmgr_name: "{{ qm_name }}"
@@ -122,6 +127,7 @@ In `site-nativeha.yml` / `site-nativeha-ubuntu.yml`, at the `include_role: mq-ev
 - [ ] **Step 3: Verify declared-vs-actual log type before acting (fail loud)**
 
 Prepend a verify step in `service.yml` (run once on the active instance):
+
 ```yaml
 - name: read the live queue manager's actual log type (#145)
   ansible.builtin.shell: |
@@ -142,11 +148,13 @@ Prepend a verify step in `service.yml` (run once on the active instance):
       Declared mq_log_type={{ mq_log_type }} but the live QM reports
       {{ qm_logtype.stdout | regex_search('LOGTYPE\\([A-Z]+\\)') }} — drift; refusing to proceed.
 ```
+
 > Confirm the exact `DISPLAY QMGR` attribute name for log type against S-findings; if `LOGTYPE` is not displayable, fall back to reading `qm.ini` `LogType` via a `become` `slurp`.
 
 - [ ] **Step 4: Condition the `LOGGEREV` clause on log type**
 
 Replace the fixed `ALTER QMGR ...` with a type-aware clause. Enabled arm (replicated):
+
 ```yaml
 - name: enable instrumentation events, incl. LOGGEREV on replicated/linear arms (#514/#145)
   ansible.builtin.shell: |
@@ -160,6 +168,7 @@ Replace the fixed `ALTER QMGR ...` with a type-aware clause. Enabled arm (replic
   changed_when: "'AMQ8005' in evgate.stdout"
   failed_when: evgate.rc != 0 or 'AMQ8005' not in evgate.stdout
 ```
+
 > If S4 shows `LOGGEREV(DISABLED)` is *accepted* on circular QMs, add it to the else-branch as an explicit verified negative; if rejected, the omission above **is** the verified negative (paired with the Step-3 assertion). Update the #721 comment block to state the resolved behaviour and remove "revisit if linear is ever adopted".
 
 - [ ] **Step 5: Validate**
@@ -167,6 +176,7 @@ Replace the fixed `ALTER QMGR ...` with a type-aware clause. Enabled arm (replic
 ```bash
 vrg-container-run -- vrg-validate      # ansible-lint + the whole gate
 ```
+
 Expected: PASS (no `failed_when` regressions; lint clean).
 
 - [ ] **Step 6: Commit**
@@ -185,6 +195,7 @@ git commit -m "feat(events): log-type-aware LOGGEREV via declare-and-verify (#14
 A **separate module** for clean separation (log-health vs. cluster-state, each testable alone, extraction-friendly per #79), but **deployed and scheduled by the existing `nativeha-state` role/timer** — no parallel role, no second timer — and it **reuses** `nativehastate.py`'s `dspmq -o nativeha` role-detection rather than re-implementing it (alignment decision, issue 1 → option A).
 
 **Files:**
+
 - Create: `src/mqlab/loglifecycle.py` (imports the role-detection helper from `mqlab.nativehastate`; no duplicate `dspmq` parsing)
 - Create: `tests/test_loglifecycle.py`
 - Modify: `ansible/roles/nativeha-state/tasks/main.yml` (also install the `lab-loglifecycle-state` script and have the existing timer's service invoke it — a small wrapper runs both collectors, each writing its own `.prom` textfile)
@@ -233,6 +244,7 @@ def test_render_prom_is_node_exporter_textfile():
 ```bash
 uv run pytest tests/test_loglifecycle.py -v
 ```
+
 Expected: FAIL (module not found).
 
 - [ ] **Step 3: Implement `loglifecycle.py` (stdlib-only), following the `nativehastate.py` skeleton**
@@ -245,6 +257,7 @@ Structure: module docstring stating the deploy-verbatim + importable invariant; 
 uv run pytest tests/test_loglifecycle.py -v
 # add cases until every branch (timeout->stale, missing-field, replica-vs-active) is covered
 ```
+
 Expected: PASS, 100% branch coverage on the module.
 
 - [ ] **Step 5: Extend the existing `nativeha-state` role to also run the log-health collector**
@@ -264,6 +277,7 @@ git commit -m "feat(obs): non-MQI log-health collector via the nativeha-state ro
 ### Task 4: Cockpit log-health panel group (extend `qmboard.py`)
 
 **Files:**
+
 - Modify: `src/mqlab/qmboard.py` (add a log-health band builder; wire into `render_qm_board`, ~L342)
 - Modify: `tests/test_qmboard.py`
 
@@ -289,6 +303,7 @@ def test_log_health_band_uses_instance_series():
 ```bash
 uv run pytest tests/test_qmboard.py -k log_health -v
 ```
+
 Expected: FAIL (`_log_health_band` undefined).
 
 - [ ] **Step 3: Implement `_log_health_band`, following the existing `_qm_band` / `_queue_block` builders**
@@ -300,6 +315,7 @@ Time-series-led panels: log-disk % (used/total, `by (instance)`), active/inactiv
 ```bash
 uv run pytest tests/test_qmboard.py -v
 ```
+
 Expected: PASS, branch coverage restored to 100%.
 
 - [ ] **Step 5: Verify metric names/types on a live exporter, then regenerate boards**
@@ -323,6 +339,7 @@ git commit -m "feat(cockpit): time-series log-health band on the per-QM board (#
 ### Task 5: Live-lab induce-and-assert validation playbook (under epic #38)
 
 **Files:**
+
 - Create: `ansible/validate-nativeha-log-lifecycle.yml` (or the framework's `validate <system>` convention from #38)
 
 **Consumes:** Tasks 2–4 (LOGGEREV on, collector emitting, panel wired).
@@ -370,6 +387,7 @@ git commit -m "test(live-lab): induce-and-assert Native HA log-lifecycle observa
 ### Task 6: Operator runbook (versioned site docs)
 
 **Files:**
+
 - Create: `docs/site/docs/guides/nativeha-log-lifecycle-guide.md`
 - Modify: the site nav/index that lists guides
 

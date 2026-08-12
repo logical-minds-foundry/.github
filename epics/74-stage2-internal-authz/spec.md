@@ -46,6 +46,7 @@ back-stop, DN→account `SSLPEERMAP` rules, OS service accounts, and minimal
 *denied* attempts (including after failover).
 
 **Non-goals:**
+
 - **The `qm_svc` counterparty (`SVCQM`) is out of scope — deliberately.** It is
   the black-box counterparty scaffold: test infrastructure that stands in for the
   remote side (one shared `SVCQM` serves every arm, #446) and generates response
@@ -122,9 +123,11 @@ Authored against the topology **variables** (§3), applied in order:
    stays `' '`). Keep MQ's V8 default `BLOCKUSER(*MQADMIN)` rule — no inbound
    channel may assert a privileged ID.
 2. **Deny-all back-stop, first:**
-   ```
+
+   ```text
    SET CHLAUTH('*') TYPE(ADDRESSMAP) ADDRESS('*') USERSRC(NOACCESS)
    ```
+
    Anything not explicitly mapped ends the channel immediately.
 3. **Strip the fixed `MCAUSER('mqm')`** from the three inbound channel
    definitions (set blank). The *only* path to an identity becomes the CHLAUTH
@@ -134,11 +137,13 @@ Authored against the topology **variables** (§3), applied in order:
 4. **Per-channel `SSLPEERMAP` rules** assign the non-privileged accounts (channel
    names are the variables; the inter-QM name **must** be `{{ chl_to_app }}`, not
    a literal, or the rule misses and the counterparty drops to the back-stop):
-   ```
+
+   ```text
    SET CHLAUTH('APP.SVRCONN')      TYPE(SSLPEERMAP) SSLPEER('O=app-org,OU=apps') USERSRC(MAP) MCAUSER('mqapp')
    SET CHLAUTH('MON.SVRCONN')      TYPE(SSLPEERMAP) SSLPEER('O=app-org,OU=ops')  USERSRC(MAP) MCAUSER('mqmon')
    SET CHLAUTH('{{ chl_to_app }}') TYPE(SSLPEERMAP) SSLPEER('O=svc-org')         USERSRC(MAP) MCAUSER('mqsvc')
    ```
+
 5. **The receiver asserts ownership:** `{{ chl_to_app }}` gets `PUTAUT(DEF)` so
    put-authority keys off `mqsvc` — the counterparty's self-asserted
    `MQMD.UserIdentifier` is disregarded. We decided who they are; we do not trust

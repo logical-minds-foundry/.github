@@ -31,7 +31,7 @@ This is the **lighter-footprint** half of a two-part performance strategy; the
 
 ## 2. Goals & non-goals
 
-**Goals**
+### Goals
 
 - A way to bring up **only the HA site** of a stack, skipping the DR site, to run a lighter
   footprint under load.
@@ -39,7 +39,7 @@ This is the **lighter-footprint** half of a two-part performance strategy; the
   the other HADR stacks in follow-on waves.
 - Fail loud when asked to skip DR on a stack that has no DR site declared.
 
-**Non-goals**
+### Non-goals
 
 - **No remembered "HA-only" lab state.** `status`/`teardown`/`dr` are unchanged; a skipped
   site-B simply reads as "not created" (the existing state for a topology-declared but absent
@@ -56,7 +56,7 @@ A **stateless, flag-based** bring-up path.
 
 ### 3.1 Invocation
 
-```
+```bash
 mqlab bootstrap <stack> --no-dr
 ```
 
@@ -95,7 +95,7 @@ that doesn't follow it. Explicit is per-stack-correct and self-documenting.
 The **effective bring-up members** when `--no-dr` is set are the stack's members minus the
 hosts contributed by its `dr_groups`:
 
-```
+```text
 effective_members = stack_members(stack) - hosts_of(dr_groups)
 ```
 
@@ -181,6 +181,7 @@ behaviour onto a bring-up flag.
 **Acceptance (validation task, cold rebuild):**
 
 `mqlab bootstrap nativeha-ubuntu --no-dr` on a cold lab →
+
 - exactly three QM guests up (`nha-ubuntu-a1/a2/a3`), no `b*` guests;
 - Native HA quorum forms (`QUORUM(3/3)`, an `Active` instance);
 - the HA + app/inter-QM MQSC is applied;

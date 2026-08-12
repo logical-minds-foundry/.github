@@ -40,7 +40,7 @@ targeted `mqlab box rebuild`, not a scorched-earth data-disk wipe.
 
 ## 2. Goals & non-goals
 
-**Goals**
+### Goals
 
 1. First-class `mqlab box` verbs to inspect and manage the baked-image layer per-box
    and `--all`, surfacing the builders' REUSE/BUILD/STALE decisions as first-class
@@ -51,7 +51,7 @@ targeted `mqlab box rebuild`, not a scorched-earth data-disk wipe.
 3. A cold-boot staleness nudge so the `/vergil` data disk does not silently drift for
    months between clean-slate rebuilds.
 
-**Non-goals**
+### Non-goals
 
 - Baking **new stacks/arms** — that is the arm-baking line (`.github#88` native-HA
   RHEL, then the Ubuntu arms) and `.github#72`.

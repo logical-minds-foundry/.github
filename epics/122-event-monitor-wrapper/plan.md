@@ -27,11 +27,13 @@
 **No code change. Deliverable:** the research-findings sections of the internal report at `docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md` (use the actual run date), plus `amqsevt.c` in the shared build tree. This task **gates T2**: A0 decides `setsid`-viable vs Python-fallback, A1's open mode branches the 2042 work, A3 informs the sleep value. Every finding is recorded verbatim (command + output) as evidence.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md` (research sections; B-matrix sections filled in Task 4)
 - Create: `docs/reports/assets/mq-event-monitor-wrapper/` (evidence: `ps` captures, `runmqsc` handle dumps, reap-timing log)
 - Fetch (not committed): `amqsevt.c` into `$(mqlab build path …)` shared tree
 
 **Interfaces:**
+
 - Produces (consumed by T2/T4): **A0 decision** — `setsid` execs-in-place (mechanism viable) vs forced-fork (fallback); **A1 open mode** — exclusive vs shared input on the event queues; **A3 reap window** — typical and observed-max seconds for a stale exclusive handle to clear.
 - Consumes: the running `#114` collector on `SVCQM` (`svc` host).
 
@@ -138,11 +140,13 @@ vrg-pr-workflow report-ready --issue 760 --title "docs(events): amqsevt behaviou
 **Blocked-by T1** (needs the A0 mechanism decision and the A3 sleep/retry values). Deliverable: the new wrapper + SERVICE definition, `vrg-validate` green, and a live start + clean-stop smoke test on `SVCQM`.
 
 **Files:**
+
 - Modify: `ansible/roles/mq-event-monitor/templates/run.sh.j2` (exec → supervision loop under `setsid`)
 - Modify: `ansible/roles/mq-event-monitor/tasks/service.yml` (SERVICE `STARTCMD`/`STOPCMD`/`STOPARG`)
 - Modify: `ansible/roles/mq-event-monitor/defaults/main.yml` (add `mq_event_sleep_secs`, `mq_event_open_retry_secs`)
 
 **Interfaces:**
+
 - Consumes: T1's A0 decision (mechanism), A3 reap window (sleep/bound values), existing role vars (`mq_event_amqsevt_bin`, `mq_event_syslog_tag`, `mq_event_logger_max_size`, `mq_event_run_dir`, `mq_event_service_name`).
 - Produces (consumed by T3/T4): a `run.sh` that supervises `amqsevt`, restarts on crash, dies cleanly on a group `SIGTERM`; a SERVICE whose `STOPCMD` reaps the whole group.
 
@@ -258,11 +262,13 @@ vrg-pr-workflow report-ready --issue 761 --title "feat(events): self-healing amq
 **Blocked-by T2** (the harness drives the deployed wrapper). Deliverable: a repeatable B-matrix procedure and a script an AI lab agent can run to gather evidence, plus the report's B-matrix scaffold. No production-role change.
 
 **Files:**
+
 - Create: `docs/reference/event-monitor-wrapper-validation.md` (the human/agent-runnable procedure)
 - Create: `tools/validate-event-monitor-wrapper.sh` (the evidence-gathering harness)
 - Modify: `docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md` (add the empty B1/B2/B3 evidence sections)
 
 **Interfaces:**
+
 - Consumes: T2's wrapper/SERVICE behaviour; the QM name + host as harness parameters.
 - Produces (consumed by T4): `validate-event-monitor-wrapper.sh <host-group> <QM>` writing evidence files under `docs/reports/assets/mq-event-monitor-wrapper/b*/`, and a runbook prose describing each check + expected result.
 
@@ -276,7 +282,7 @@ Create `docs/reference/event-monitor-wrapper-validation.md` describing, per scen
 
 - [ ] **Step 3: Add the B-matrix scaffold to the report**
 
-In `docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md`, add empty `## B1 — normal start`, `## B2 — clean stop (checkpoint)`, `## B3 — crash recovery (+2042 if exclusive)` sections with a one-line description and an "evidence: see assets/…/b<N>/" pointer, to be filled by the Task 4 run.
+In `docs/reports/2026-07-21-mq-event-monitor-wrapper-resilience.md`, add empty `## B1 — normal start`, `## B2 — clean stop (checkpoint)`, `## B3 — crash recovery (+2042 if exclusive)` sections with a one-line description and an "evidence: see `assets/…/b<N>/`" pointer, to be filled by the Task 4 run.
 
 - [ ] **Step 4: Static validation**
 
@@ -324,6 +330,7 @@ vrg-pr-workflow report-ready --issue 762 --title "docs(events): validation runbo
 ## Self-Review
 
 **Spec coverage:**
+
 - A0 spawn topology + setsid decision (spec §5 A0, §3.1 checkpoint) → T1 Steps 1–2. ✅
 - A1 amqsevt source read + open mode, branches 2042 (spec §5 A1, §6 B3) → T1 Steps 3–4. ✅
 - A2 signal/exit + handle behaviour (spec §5 A2) → T1 Step 5. ✅
@@ -343,4 +350,3 @@ vrg-pr-workflow report-ready --issue 762 --title "docs(events): validation runbo
 **Consistency:** role vars named identically to the existing role (`mq_event_amqsevt_bin`, `mq_event_syslog_tag`, `mq_event_logger_max_size`, `mq_event_run_dir`, `mq_event_service_name`) plus the two new defaults (`mq_event_sleep_secs`, `mq_event_open_retry_secs`) used verbatim in `run.sh.j2`; the harness/report evidence dir `docs/reports/assets/mq-event-monitor-wrapper/` is one path throughout; `SVCQM`/`svc` is the single worked example across T1/T2/T4. ✅
 
 **Open questions carried from the spec (resolve at build):** setsid exec-vs-fork (T1 Step 1–2 decides, T2 Step 5 proves); open-retry bound value (`mq_event_open_retry_secs` default 1800, revisited from A3); logger pipeline across restarts (T2 Step 2 uses a per-run `logger`; T4/B3 confirms no drop/dup across a restart); exclusive-vs-shared open (T1 branches); which QM hosts the run (worked example `SVCQM`; confirmed at T4).
-```

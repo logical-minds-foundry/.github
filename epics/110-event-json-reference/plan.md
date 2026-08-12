@@ -32,6 +32,7 @@
 **Runs on the cloud Native HA RHEL host.** Force one representative event per enabled class; for each, take an authoritative complete copy via a direct `amqsevt` read, capture what the `#31` journald pipeline delivered, and record byte-size + fit. Commit the curated fixtures that T2/T3 consume.
 
 **Files:**
+
 - Create (fixtures): `docs/reports/assets/110-mq-event-captures/json/<event-slug>.json` (authoritative pretty JSON, one per captured event)
 - Create: `docs/reports/assets/110-mq-event-captures/commands/<event-slug>.md` (exact forcing commands + cleanup, one per event)
 - Create: `docs/reports/assets/110-mq-event-captures/syslog-fidelity.md` (per-event size/fit table)
@@ -39,6 +40,7 @@
 - Scratch (gitignored, NOT committed): raw drains under `$(mqlab build path temp)/110-captures/`
 
 **Interfaces:**
+
 - Consumes: a running Native HA QM with events enabled per `#694`/`#31` (`AUTHOREV…CMDEV`), the `#31` `MQ.EVENT.MONITOR` collector live (journald tag `mq-events`), `/opt/mqm/samp/bin/amqsevt`.
 - Produces: for each captured event a `<event-slug>` with a committed `json/<slug>.json`, `commands/<slug>.md`, and a `syslog-fidelity.md` row. T2 consumes the JSON + fidelity table; T3 consumes the commands.
 
@@ -207,11 +209,13 @@ Report ready via `vrg-pr-workflow report-ready` (human runs `vrg-submit-pr`). T2
 **Blocked-by T1.** Author the consume-side report from the T1 fixtures. No hand-written JSON — every appendix block is a T1 `json/<slug>.json`.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-20-mq-event-json-working-with-the-data.md`
 - Read (fixtures): `docs/reports/assets/110-mq-event-captures/{json/*,syslog-fidelity.md}`
 - Reference (style/pairing): `docs/reports/2026-07-17-mq-event-monitoring-to-file.md`, `docs/site/docs/guides/mq-event-monitoring-guide.md`
 
 **Interfaces:**
+
 - Consumes: T1 fixtures (authoritative JSON + fidelity table).
 - Produces: the durable consume-side reference; `#710` cross-links it from the site guide.
 
@@ -265,10 +269,12 @@ Report ready via `vrg-pr-workflow report-ready`.
 **Blocked-by T1.** Author the generation reference from the T1 `commands/` fixtures. This is the input `#112` will mechanize toward `#38`.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-20-mq-event-generation-lab-reference.md`
 - Read (fixtures): `docs/reports/assets/110-mq-event-captures/{commands/*,README.md,syslog-fidelity.md}`
 
 **Interfaces:**
+
 - Consumes: T1 `commands/<slug>.md` (exact forcing commands + cleanup) and `README.md` (host/QM/version provenance).
 - Produces: the reproducible generation reference; seeds `#112`.
 
@@ -303,6 +309,7 @@ Report ready via `vrg-pr-workflow report-ready`.
 ## Self-Review
 
 **Spec coverage:**
+
 - Report A (consume/schema/appendix) → Task 2. Report B (generation) → Task 3. ✅
 - Real lab-captured JSON, one per enabled class → Task 1 recipe table + fixtures. ✅
 - Authoritative-from-`amqsevt`, syslog measured against it → T1 Steps 3–6; Global Constraints. ✅

@@ -38,7 +38,7 @@ making the iteration loop cheap**, not for perfecting every panel up front.
 
 ## 2. Goals & non-goals
 
-**Goals**
+### Goals
 
 - Three reusable, portable **work-edition** boards: a **QM view**, a **Queue/channel view**,
   and an **Infrastructure / HA-DR view (Native HA CRR only)**.
@@ -47,7 +47,7 @@ making the iteration loop cheap**, not for perfecting every panel up front.
 - A fast render → export → import → tweak iteration loop.
 - **Prior-art citations shipped as first-class documentation** (see §3.1).
 
-**Non-goals**
+### Non-goals
 
 - Disturbing the lab's existing object-driven boards. The work edition is a separate family.
 - RDQM and Pacemaker/DRBD infrastructure views — work does not run those technologies. Backlog

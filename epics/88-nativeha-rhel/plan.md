@@ -25,7 +25,7 @@
 
 ## Task dependency graph
 
-```
+```text
 T1 (mq-nativeha-rhel9 box + install-RedHat.yml skip-if-baked guard + mqlab wiring)
       │
       ▼
@@ -49,6 +49,7 @@ Deployment (bake + cache mq-nativeha-rhel9)  ──▶  Validation #665
 Additive foundation: make the box buildable and make the per-run RHEL MQ install skip when already baked — **without** yet repointing any node (un-baked `nha-rhel-*` nodes still install from the base box until Task 2). Modelled on #70 Tasks 2–3, minus the builder (which already exists).
 
 **Files:**
+
 - Create: `ansible/bake-nativeha-rhel.yml` (bake playbook — mirrors `ansible/bake-mq-rdqm.yml`)
 - Modify: `ansible/roles/mq-nativeha/tasks/install-RedHat.yml` (add the #659 `stat cmqc.h` skip-if-baked guard)
 - Modify: `lab/boxes/build-fatbox.sh:62-65` (add the `mq-nativeha-rhel9` `case` arm)
@@ -57,6 +58,7 @@ Additive foundation: make the box buildable and make the per-run RHEL MQ install
 - Test: `tests/test_box_build.py` (resolution), and an `install-RedHat.yml`-guard assertion (see Step 6)
 
 **Interfaces:**
+
 - Consumes: the existing `build-fatbox.sh` builder (#628), `bake-host.ini`, the `mq-nativeha` role.
 - Produces: `build/state/boxes/mq-nativeha-rhel9.box` buildable via `build-fatbox.sh --box mq-nativeha-rhel9` / `mqlab`; a per-run `install-RedHat.yml` that no-ops when `/opt/mqm/inc/cmqc.h` exists. `_manifest-hash.sh mq-nativeha-rhel9` digests `bake-nativeha-rhel.yml` + its role closure.
 
@@ -143,10 +145,12 @@ def test_needed_local_boxes_resolves_nativeha_rhel_box(monkeypatch):
 ### Task 2: Repoint `nha-rhel-*` + phased startup + cold-rebuild proof
 
 **Files:**
+
 - Modify: `lab/topology.yaml` — add a `mq-nativeha-rhel9` `boxes:` entry (mirror the `mq-rdqm-rhel9` entry: **keeps the DVD** attach for the configure-half offline repo; **no** kernel-pin note, **no** `extra_disk`); repoint `nha-rhel-a1..3`, `nha-rhel-b1..3` `platform` from `rhel96-x86_64` to the new box.
 - Modify (only if needed): `ansible/site-nativeha.yml` / the `mq-nativeha` play wiring — confirm the baked install is bypassed by Task 1's guard; apply phased startup (#642) so any baked service starts per-run bottom-up, with `node_exporter` the sole benign enabled-at-bake exception.
 
 **Interfaces:**
+
 - Consumes: the `mq-nativeha-rhel9` box + guard (Task 1).
 - Produces: the six `nha-rhel-*` nodes boot from `mq-nativeha-rhel9`; the per-run path runs only formation + config.
 

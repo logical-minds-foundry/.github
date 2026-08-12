@@ -51,7 +51,7 @@ bash (`build-fatbox.sh`); Ansible (bake playbooks); libvirt/Vagrant lab; IBM MQ
 
 ## Task dependency graph
 
-```
+```text
               agnostic-code (PR-workable, land in mq-resiliency-lab-for-linux)
   T1 platforms.box_build_arch + is_foreign_box_build (authority + D11 predicate)
        │
@@ -79,10 +79,12 @@ bash (`build-fatbox.sh`); Ansible (bake playbooks); libvirt/Vagrant lab; IBM MQ
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `src/mqlab/platforms.py` (add after `build_domain_virt`, ~line 122)
 - Test: `tests/test_platforms.py`
 
 **Interfaces:**
+
 - Consumes: a box-registry `entry` (`dict[str, Any]`, the `boxes[<name>]` value with
   an optional `"arch"`), `HostFacts` (`arch`), module constants `X86_64`, `AARCH64`.
 - Produces:
@@ -158,11 +160,13 @@ def is_foreign_box_build(entry: dict[str, Any], facts: HostFacts) -> bool:
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `src/mqlab/cli.py` — `_box_build_steps` (~line 1022), the `platforms` import
   (~line 52), a box-registry accessor
 - Test: `tests/test_cli_vm.py`
 
 **Interfaces:**
+
 - Consumes: `platforms.box_build_arch`, `platforms.is_foreign_box_build` (T1);
   `hostfacts` (`cli.probe`); the `boxes:` registry from `lab/topology.yaml`.
 - Produces: `_box_build_steps(...)` argv now carries `--arch <aarch64|x86_64>` for each
@@ -257,12 +261,14 @@ unchanged; `--arch` is appended only on the `build-fatbox.sh` branch.)
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `lab/boxes/build-fatbox.sh` — arg loop (~L48), usage (~L34), cache
   (`CACHE`/`HASH_FILE` L95-96), base-box add (L166), base-img find (L173-174), the
   build-domain XML (`<os><type arch=…>` L223), the emulator element
 - Test: `tests/test_build_fatbox_usage.py` (new; mirrors `tests/test_build_box_usage.py`)
 
 **Interfaces:**
+
 - Consumes: `--arch <aarch64|x86_64>` from T2 (required).
 - Produces: an arch-correct guest domain + base-box add + cache filename
   `<box>-<arch>.box` / `<box>-<arch>.manifest-hash`; usage-die on missing/invalid
@@ -355,6 +361,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `src/mqlab/box.py` — `BoxSpec` (add `arch`), `_build_fleet` (compute arch),
   `cache_artifact` (`<name>-<arch>.box`), `render_status` (arch column)
 - Modify: the `mqlab build migrate` implementation (find via
@@ -362,6 +369,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 - Test: `tests/test_box.py`, `tests/test_build_migrate.py` (or the existing migrate test)
 
 **Interfaces:**
+
 - Consumes: `platforms.box_build_arch` (T1), `hostfacts.probe`, the `boxes:` registry.
 - Produces: `BoxSpec.arch: str`; `cache_artifact == f"{name}-{arch}.box"`; the base box
   becomes `rhel-9.6-x86_64-libvirt.box` unchanged (already arch-tagged). Migration
@@ -398,6 +406,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Modify: `lab/topology.yaml` — drop `arch: x86_64` from `obs-ubuntu2404` (L60),
   `infra-ubuntu2404` (L70), `mq-ubuntu2404` (L82) and update their pin-rationale
   comments to "host-resolved (#103) — arch tracks the host"
@@ -408,6 +417,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 - Test: `tests/test_manifest.py`, `tests/test_platforms.py`
 
 **Interfaces:**
+
 - Consumes: `box_build_arch` (T1); `hostfacts`.
 - Produces: an un-pinned Ubuntu fat-box registry entry resolves its arch from facts
   (so `_provider`/`box_build_arch` yield the host arch); acquisition stages the
@@ -445,6 +455,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Create: `ansible/bake-nativeha-ubuntu.yml` (mirror `ansible/bake-nativeha-rhel.yml`:
   install-body-only, node-exporter baked+enabled, alloy install-half inert)
 - Modify: the Ubuntu Native-HA install role's `install-Debian`/`install.yml` — add the
@@ -452,7 +463,7 @@ interpolate `$ARCH`/machine/emulator directly.)
   #668)
 - Modify: `lab/boxes/build-fatbox.sh` — add `mq-nativeha-ubuntu) BASE_KIND=ubuntu;
   BASE_BOX="cloud-image/ubuntu-24.04"; BAKE=nativeha-ubuntu ;;` to the `--box` case-map
-  + the usage list
+  - the usage list
 - Modify: `src/mqlab/cli.py` `_LOCAL_BOX_BUILDERS` — register `mq-nativeha-ubuntu` →
   `build-fatbox.sh` (fleet + box CLI pick it up via `_build_fleet`)
 - Modify: `lab/topology.yaml` — add a host-resolved `mq-nativeha-ubuntu` `boxes:` entry
@@ -463,6 +474,7 @@ interpolate `$ARCH`/machine/emulator directly.)
   `platform == "mq-nativeha-ubuntu"`, no `extra_disk`)
 
 **Interfaces:**
+
 - Consumes: the arch-aware builder (T3), un-pinned host-resolved boxes + acquisition
   (T5), arch-aware fleet (T4).
 - Produces: a buildable `mq-nativeha-ubuntu` box (per-arch cache) and `nha-ubuntu-*`
@@ -506,6 +518,7 @@ interpolate `$ARCH`/machine/emulator directly.)
 **Platform:** agnostic-code · **Repo:** `mq-resiliency-lab-for-linux`
 
 **Files:**
+
 - Create: `ansible/bake-pcmk-ubuntu.yml` (mirror T6; the Pacemaker/MQ cluster-node
   install body only — **not** the SAN target install)
 - Modify: the Pacemaker MQ install role — add the skip-if-baked guard (as T6 Step 3)
@@ -519,6 +532,7 @@ interpolate `$ARCH`/machine/emulator directly.)
   `pcmk-ubuntu`, and `san-a`/`san-b` are **not** repointed)
 
 **Interfaces:**
+
 - Consumes: T3/T4/T5 as in T6.
 - Produces: a `pcmk-ubuntu` box and repointed cluster nodes; SAN nodes unchanged.
 
@@ -601,6 +615,7 @@ Each carries a **platform** the human routes to the agent on that host.
 ## Self-Review
 
 **Spec coverage:**
+
 - D1 `box_build_arch` → T1. ✓
 - D2 orchestrator `--arch` → T2 + T3. ✓
 - D3 un-pin Ubuntu fat boxes → T5. ✓

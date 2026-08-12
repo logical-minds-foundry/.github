@@ -24,10 +24,12 @@
 ### Task 1: Classify mqweb as data-plane infrastructure (docs)
 
 **Files:**
+
 - Modify: `docs/reference/dns-fqdn-inventory.md`
 - Modify: `docs/specs/2026-06-03-mq-cluster-lab-design.md` (§8.3 ~line 1145; §1 ~line 192)
 
 **Interfaces:**
+
 - Consumes: the canonical-address scheme (conceptual). Parallel-safe with Task 2.
 - Produces: the authoritative prose classification other tasks cite.
 
@@ -53,6 +55,7 @@ vrg-commit --type docs --scope obs --message "classify mqweb REST as data-plane 
 ### Task 2: Topology-derived canonical published REST address (both sites + DR invariant)
 
 **Files:**
+
 - Create: `src/mqlab/rest.py`
 - Create: `tests/test_rest.py`
 - Modify: `src/mqlab/cli.py` (register a `rest` sub-Typer with `render` — mirror `dns render` at `cli.py:529`)
@@ -61,6 +64,7 @@ vrg-commit --type docs --scope obs --message "classify mqweb REST as data-plane 
 - Modify: `docs/development/lab-bringup-capture.md` (flag the step-5 `apply.py` path as legacy Phase-B)
 
 **Interfaces:**
+
 - Produces:
   - `rest.rest_endpoints(topo: dict) -> list[dict]` — each record `{"stack": str, "kind": "vip"|"active-instance"|"counterparty", "endpoints": dict}` where `endpoints` maps a site key (`"site-a"`, optionally `"site-b"`) to a `list[str]` of full `https://<ip>:9443` URLs.
   - `rest.lab_rest_endpoints() -> list[dict]` — same, over the real `lab/topology.yaml`.
@@ -373,6 +377,7 @@ vrg-commit --type feat --scope obs --message "derive canonical mqweb REST endpoi
 ### Task 3: Native HA mqweb coverage
 
 **Files:**
+
 - Modify: `ansible/_nativeha-cluster-ha.yml` (add `- hosts: nha_rhel_a` / `roles: [mqweb]` after the `mq-nativeha` play ~line 24)
 - Modify: `ansible/_nativeha-ubuntu-cluster-ha.yml` (add `- hosts: nha_ubuntu_a` / `roles: [mqweb]` after ~line 24)
 - Modify: `ansible/_nativeha-dr-replication.yml` (add `- hosts: nha_rhel_b` / `roles: [mqweb]`)
@@ -380,6 +385,7 @@ vrg-commit --type feat --scope obs --message "derive canonical mqweb REST endpoi
 - Verify (read-only): the fixed `mqweb` PKI entity distributes to Native HA hosts.
 
 **Interfaces:**
+
 - Consumes: the existing `mqweb` role (QM-agnostic; **no vars**), `mqweb_admin_password` from `group_vars/all/admin.yml`, the `mqweb` PKI entity via `pki-distribute`.
 - Produces: a running `mqweb.service` on every Native HA instance; admin served by the active instance via the existing "find the active instance" step.
 
@@ -424,9 +430,11 @@ Expected: `mqweb.service` active on all three; the active instance's REST return
 ### Task 4: Cross-stack verification + failover proof
 
 **Files:**
+
 - Modify/Create: a verification note under `docs/reference/` recording the acceptance procedure + results; reference epic #38 as the automation home.
 
 **Interfaces:**
+
 - Consumes: `mqlab rest render` (Task 2), deployed mqweb (Task 3), `rdqm-rhel` vip_b (Task 5), the running lab.
 - Produces: recorded evidence that each published endpoint is reachable/authenticated and survives failover on both sites.
 
@@ -465,11 +473,13 @@ vrg-commit --type docs --scope obs --message "record mqweb endpoint verification
 ### Task 5: Fix the `rdqm-rhel` site-B VIP (declare in topology, de-hardcode the DR script)
 
 **Files:**
+
 - Modify: `lab/topology.yaml` (add `vip_b: 10.10.2.100` to the `rdqm-rhel` stack's `qm:` block ~line 291)
 - Modify: `lab/scripts/rdqm-dr-cutover.sh` (`:26`/`:28` — the hardcoded `TO_VIP` literals become topology-sourced or guarded)
 - Create/Modify: `tests/test_rest.py` already asserts real-topology `rdqm-rhel` resolves (Task 2 Step 5) — this task makes it green.
 
 **Interfaces:**
+
 - Consumes: Task 2's renderer + DR invariant.
 - Produces: `rdqm-rhel` publishing both-site endpoints; a single source of truth for its VIPs.
 
@@ -506,6 +516,7 @@ vrg-commit --type fix --scope obs --message "declare rdqm-rhel site-B VIP in top
 ## Self-Review
 
 **Spec coverage:**
+
 - §4.1 classify → Task 1. §4.2 canonical address (both sites) + DR invariant + legacy cleanup → Task 2. §4.3 Native HA coverage → Task 3. §4.4 rdqm-rhel site-B VIP fix → Task 5. §5 binding (`httpHost=*` stays) → Global Constraints. §7 verification (both-site probes, HA failover, DR cutover, Native HA switchover, cold-rebuild) → Task 4 (+ Task 3 Step 7, Task 5 Step 5). §6 non-goals → not implemented, correct. §8 relationships → epic-level. **No gaps.**
 - svc-sim special case → Task 2 (`counterparty`) + Task 1. DR invariant → Task 2 (unit-tested) + surfaced-and-fixed in Task 5. Consistent.
 

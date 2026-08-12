@@ -12,7 +12,7 @@ shared `SVCQM` counterparty, collecting with `amqsevt -o json_compact` to journa
 (`mq-events`) → Alloy → Loki → Grafana. The *mechanism* was unchanged; the epic
 changed **which QMs run it**, and hardened the whole thing along the way.
 
-**Work delivered**
+### Work delivered
 
 | PR | What it did |
 |---|---|
@@ -66,8 +66,7 @@ of them latent long before this work touched them.
 - A small **Alloy relabel typo** (double-underscore journald field) was fixed as
   part of T5 (#744).
 
-Live verification was **per distinct QM-creation mechanism** (SVCQM + one Native HA
-+ pcmk + rdqm), not all four stacks, per the plan.
+Live verification was **per distinct QM-creation mechanism** (SVCQM + one Native HA - pcmk + rdqm), not all four stacks, per the plan.
 
 ## §2 — Lessons learned
 

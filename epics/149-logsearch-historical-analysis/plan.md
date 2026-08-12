@@ -28,9 +28,11 @@
 De-risk the one load-bearing assumption before building anything on top of it. This gates Tasks 9–10.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-29-alloy-opensearch-connector-spike.md` (findings)
 
 **Interfaces:**
+
 - Produces: the chosen connector (`otelcol.exporter.*` native **or** Data Prepper fallback) and the exact Alloy config block that ships journald lines into OpenSearch — consumed by Task 9.
 
 - [ ] **Step 1: Enumerate the native path.** On a scratch host with Alloy installed (or the `alloy` role's binary), check whether the build exposes an Elasticsearch/OpenSearch exporter: `alloy tools ...` / the component reference, and grep the embedded component list. Record present/absent.
@@ -46,9 +48,11 @@ De-risk the one load-bearing assumption before building anything on top of it. T
 Prove the host-side snapshot/restore round-trip before wiring it into roles and the CLI.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-29-opensearch-snapshot-spike.md`
 
 **Interfaces:**
+
 - Produces: the chosen snapshot mechanism (native `_snapshot` filesystem repo **or** cold-copy of a stopped `path.data`) and the exact guest→host transport (Ansible `fetch`/`synchronize`) — consumed by Tasks 4 and 11.
 
 - [ ] **Step 1: Register a filesystem snapshot repo** on the throwaway OpenSearch (`path.repo` in `opensearch.yml`, then `PUT _snapshot/logsearch-fs`). Index 5 docs.
@@ -62,10 +66,12 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 ### Task 3: `opensearch` role — install half
 
 **Files:**
+
 - Create: `ansible/roles/opensearch/tasks/main.yml`, `tasks/install.yml`, `defaults/main.yml`, `templates/opensearch.yml.j2`, `handlers/main.yml`
 - Reference pattern: `ansible/roles/loki/tasks/{main,install}.yml`
 
 **Interfaces:**
+
 - Produces: an installed-but-inert OpenSearch (`systemctl is-enabled opensearch` → disabled after bake) with `path.data` on the guest disk, `vm.max_map_count=262144`, and a static `opensearch.yml`. Consumed by Task 4 (configure), Task 7 (bake), Task 10 (site play).
 
 - [ ] **Step 1: `main.yml`** mirrors loki — `import_tasks: install.yml` then `import_tasks: configure.yml` (configure added in Task 4; create the file now importing only install, add the configure import in Task 4).
@@ -79,10 +85,12 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 ### Task 4: `opensearch` role — configure half (start + index template + snapshot/restore)
 
 **Files:**
+
 - Create: `ansible/roles/opensearch/tasks/configure.yml`, `templates/index-template.json.j2`
 - Modify: `ansible/roles/opensearch/tasks/main.yml` (add `import_tasks: configure.yml`)
 
 **Interfaces:**
+
 - Consumes: Task 2's snapshot mechanism decision.
 - Produces: the `OPENSEARCH_ADMIN_*` credential seam (via `build/state/secrets/`); a running OpenSearch (green on single node); the `logs-*` index template with `number_of_replicas: 0` + daily-index pattern; a registered snapshot repository; the **restore-on-bring-up** behavior. Consumed by Task 5 (reuses the credential seam), Task 10, Task 11, Task 12.
 
@@ -98,9 +106,11 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 ### Task 5: `opensearch-dashboards` role (install + configure)
 
 **Files:**
+
 - Create: `ansible/roles/opensearch-dashboards/tasks/{main,install,configure}.yml`, `defaults/main.yml`, `templates/opensearch_dashboards.yml.j2`, `handlers/main.yml`
 
 **Interfaces:**
+
 - Consumes: the running OpenSearch from Task 4 (`opensearch.hosts`); the `OPENSEARCH_ADMIN_*` credential seam from Task 4 Step 1.
 - Produces: OpenSearch Dashboards reachable on the mgmt plane at a known port (default 5601), pointed at the local OpenSearch, **with a default `logs-*` index pattern** so Discover works out of the box. Consumed by Task 11 (`open`), Task 12.
 
@@ -115,10 +125,12 @@ Prove the host-side snapshot/restore round-trip before wiring it into roles and 
 ### Task 6: Pin OpenSearch + Dashboards versions in the shared manifest
 
 **Files:**
+
 - Modify: `src/mqlab/manifest.py` (the shared observability version overlay), the manifest YAML it reads, `ansible/roles/opensearch/defaults/main.yml` + `opensearch-dashboards/defaults/main.yml` (consume the pin)
 - Test: `tests/test_manifest.py`
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces: `opensearch_version` / `opensearch_dashboards_version` available to the roles from the single manifest source, so a re-bake never changes the version under an existing snapshot.
 
@@ -142,11 +154,13 @@ def test_observability_manifest_pins_opensearch(tmp_path):
 ### Task 7: Register + bake the `logsearch-ubuntu2404` box
 
 **Files:**
+
 - Modify: `src/mqlab/cli.py` (`_LOCAL_BOX_BUILDERS`, ~line 936)
 - Create: `ansible/bake-logsearch.yml`
 - Test: `tests/test_box_fleet.py` (or the existing box-fleet test module)
 
 **Interfaces:**
+
 - Consumes: Tasks 3–5 roles (install halves), Task 6 pins.
 - Produces: a baked `logsearch-ubuntu2404` fat box (OpenSearch + Dashboards + node-exporter + alloy, inert). Consumed by Task 8 (topology platform).
 
@@ -170,10 +184,12 @@ def test_fleet_includes_logsearch_box():
 ### Task 8: Add the `logsearch` node to topology
 
 **Files:**
+
 - Modify: `lab/topology.yaml` (boxes block + `nodes:`)
 - Test: `tests/test_topology_integrity.py` (or a new `tests/test_topology_logsearch.py`)
 
 **Interfaces:**
+
 - Consumes: Task 7's box.
 - Produces: a `logsearch` node on the mgmt plane. Consumed by Tasks 9–12.
 
@@ -198,9 +214,11 @@ def test_logsearch_node_present_and_mgmt_only():
 ### Task 9: Alloy fan-out sink to OpenSearch
 
 **Files:**
+
 - Modify: `ansible/roles/alloy/templates/config.alloy.j2`, `ansible/roles/alloy/defaults/main.yml` (gating var)
 
 **Interfaces:**
+
 - Consumes: Task 1's connector decision; Task 4's running OpenSearch.
 - Produces: the same journald/mqweb corpus Loki receives, also written to OpenSearch. Consumed by Task 12.
 
@@ -214,10 +232,12 @@ def test_logsearch_node_present_and_mgmt_only():
 ### Task 10: `site-logsearch.yml` — the per-run configure play
 
 **Files:**
+
 - Create: `ansible/site-logsearch.yml`
 - Reference: `ansible/site-obs.yml`
 
 **Interfaces:**
+
 - Consumes: Tasks 3–5, 9.
 - Produces: `mqlab`-invokable bring-up of the `logsearch` node (configure halves + alloy fan-out + auto-restore). Consumed by Task 11 (CLI may shell to it) and Task 12.
 
@@ -230,11 +250,13 @@ def test_logsearch_node_present_and_mgmt_only():
 ### Task 11: `mqlab logsearch` CLI
 
 **Files:**
+
 - Create: `src/mqlab/logsearch.py`
 - Modify: `src/mqlab/cli.py` (add `logsearch_app`, `app.add_typer(..., name="logsearch")`)
 - Test: `tests/test_logsearch_cli.py`
 
 **Interfaces:**
+
 - Consumes: Task 4 (OpenSearch health/API), Task 5 (Dashboards URL), Task 2 (snapshot transport).
 - Produces: `mqlab logsearch {status,open,snapshot,restore}`.
 
@@ -265,9 +287,11 @@ def test_latest_snapshot_selection():
 This is the epic's `validation` operational task (filed on GitHub at plan close, blocked-by Tasks 1–11). Not PR-workable; run via `issue-validate`; closes only on `Outcome: SUCCESS`.
 
 **Files:**
+
 - Create: `docs/reference/logsearch-validation-runbook.md`
 
 **Procedure & acceptance:**
+
 - [ ] **Step 1: Cold rebuild** the box + lab from scratch (`vrg-vm rebuild` → box bake → `mqlab vm up` → bring-up incl. `site-logsearch.yml`). One-pass, no manual fixups.
 - [ ] **Step 2: Baseline** — `mqlab logsearch status` healthy (green); Dashboards reachable via `mqlab logsearch open`; **doc count rising** (ingestion flowing); a full-text search returns; a generic `date_histogram` aggregation (events-per-hour by severity) returns non-empty.
 - [ ] **Step 3: Snapshot round-trip** — `mqlab logsearch snapshot`; `vagrant destroy logsearch && mqlab vm up logsearch`; confirm bring-up **auto-restored** and the corpus is present. Separately confirm a destroy with **no** snapshot returns an empty store (documented tradeoff, not a failure).
@@ -279,10 +303,12 @@ This is the epic's `validation` operational task (filed on GitHub at plan close,
 ### Task 13: v1 documentation
 
 **Files:**
+
 - Modify: `docs/development/build-layout.md` (add `logsearch/` to the `state/` inventory)
 - Create/modify: site docs for the `logsearch` tier + `mqlab logsearch` CLI reference
 
 **Interfaces:**
+
 - Consumes: all prior tasks.
 - Produces: the human-facing v1 docs. *(The broader multi-repo sweep is the doc-review bookend `#818`.)*
 
@@ -295,6 +321,7 @@ This is the epic's `validation` operational task (filed on GitHub at plan close,
 ## Self-Review
 
 **Spec coverage:**
+
 - §2 criteria 1–6 → Tasks 3–5/7/8 (node+engine), 9 (fan-out), 5 (`logs-*` index pattern so Discover works) + 11 (Discover reachable via `open`; status), 4/11/12 (snapshot/restore), 8/11 (unit tests). ✔
 - §4 fan-out / stack-agnostic → Task 9 (re-uses envelope sources). ✔
 - §5 node (single, sized, max_map_count, version pin, node-exporter) → Tasks 3/6/7/8. ✔

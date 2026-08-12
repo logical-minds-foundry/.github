@@ -126,8 +126,7 @@ component-extraction roadmap (#368).
 ### 4.2 One board per stack, from a spec map
 
 The `_NHA_ARM_SPEC` pattern. A `_MSG_STACK_SPEC` maps each stack to its messaging
-identity (`app_qm`, `svc_qm`, groups, uid, title). QM names come from each stack's
-#351 short-derived `qm_app`/`qm_svc`; channel/queue names are lab constants — no
+identity (`app_qm`, `svc_qm`, groups, uid, title). QM names come from each stack's #351 short-derived `qm_app`/`qm_svc`; channel/queue names are lab constants — no
 QM literal hardcoded in the builder. Renders `lab-messaging-pcmk`,
 `lab-messaging-rdqm`, `lab-messaging-nativeha-rhel`, `lab-messaging-nativeha-ubuntu`.
 
@@ -141,15 +140,18 @@ messaging board; deeper dedup of `lab-status`'s existing MQ section is out of sc
 ## 5. Layout — flow-oriented (top → bottom)
 
 ### 5.1 Title banner
+
 `Messaging Layer · <STACK> · app-client ⇄ <APP_QM> ⇄ <SVC_QM> ⇄ svc-sim`.
 
 ### 5.2 ① Status band — flow indicators (not depths)
+
 Compact tiles for **flow health**: App QM up · SVC QM up · round-trip success % ·
 message rate (msg/s) · error/failure rate. Deliberately **no summed queue depth** —
 per-queue depth is a per-queue concern (queues matrix / future per-queue board),
 not a meaningless aggregate.
 
 ### 5.3 ② The message flow
+
 A horizontal strip of **positioned status tiles** (built from `_stat` + text
 connectors, not a custom viz, so it stays generic): `app-client → APP.SVRCONN →
 [APP QM] → SDR chl → [SVC QM] → SVC.SVRCONN → svc-sim`, with the return
@@ -157,6 +159,7 @@ connectors, not a custom viz, so it stays generic): `app-client → APP.SVRCONN 
 depth). Signature panel; iterate on its look after first render.
 
 ### 5.4 ⟳ Round-trip timeline (the signature panel)
+
 The failover-timeline analog for messaging: a left-to-right flowing time series of
 **message rate f(t)** and **failure rate f(t)**, with round-trip **latency** as a
 heatmap/histogram over the same window. This is where burst workloads, induced
@@ -165,11 +168,13 @@ visualization is settled by experiment during build; the histogram metric (§3.2
 keeps rate/failure/latency/percentile options all open.
 
 ### 5.5 ▤ Round-trip logs
+
 `_logs_panel` over `{unit=~"mq-app-requester|mq-svc-responder"} |~ ${level}` (the
 shared `$level` toggle), interleaving the requester's round-trip lines with the
 responder.
 
 ### 5.6 Queues & Channels matrices
+
 Queues: depth · put/s · get/s per queue (each row data-links to
 `lab-messaging-queue`, future). Channels: status · type per channel (each row
 data-links to `lab-messaging-channel`, future). Because scraping is wildcard, these
@@ -179,16 +184,19 @@ depth) — display-filtered, not scrape-filtered.
 ## 6. The always-on workload (Task ②)
 
 ### 6.1 Both ends run continuously, by default
+
 Both `svc-responder` (already a service) and `app-requester` (promoted from a
 manual client) are managed systemd services, **enabled + started on provision**,
 so every stack boots with a steady nonstop request→reply stream and the cockpit
 shows live data immediately.
 
 ### 6.2 v1 is deliberately laminar
+
 v1 streams at a **fixed rate with a fixed message shape** — "good enough" noise to
 make the board live, explicitly *not* a faithful model of the real application.
 
 ### 6.3 Designed for iteration (config seam) — the interesting future
+
 The requester carries a small config seam (**rate**, **message size/shape**, a
 **fault hook**) so the workload-realism tasks (⑦+) drop in without a rewrite:
 

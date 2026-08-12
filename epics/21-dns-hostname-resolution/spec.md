@@ -131,6 +131,7 @@ not be machine-fetched (IBM Support/APAR pages) are marked **unverified**.
 ## 5. Target architecture
 
 ### 5.1 Two businesses, two domains
+
 The lab models the classic relationship where **our** business is the **client**
 of an external **service** run by a counterparty. The boundary is the existing
 `net-ext` inter-business WAN, and the domains follow the *relationship*:
@@ -153,8 +154,10 @@ We model only the DNS layers the two sides actually touch — no root-server or
 deep-delegation realism.
 
 ### 5.2 Naming scheme — Option A (function-suffix, per-domain flat zone)
+
 Each multi-homed host exposes a **function-indicating** name per interface, plus
 a base name that is its primary service-facing identity:
+
 - Per-interface **A records**, one per NIC, suffixed by the **plane name from
   `topology.yaml`**: `<host>-data-a`, `<host>-data-b`, `<host>-mgmt`,
   `<host>-hb-a`, `<host>-ext`, etc.
@@ -169,6 +172,7 @@ a base name that is its primary service-facing identity:
   **three per-instance FQDNs** (`<qm>-a1-data-a`, `-a2`, `-a3`) in `CONNAME`.
 
 ### 5.3 BIND9 authoritative DNS on per-side infra nodes
+
 - **The one net-new component is a per-side infrastructure node.** Our-side
   `infra` is authoritative for **`client.com`** (the large zone: our whole
   estate); a **mock** service-side infra is authoritative for **`service.com`**
@@ -189,6 +193,7 @@ a base name that is its primary service-facing identity:
   work needs.
 
 ### 5.4 Zone source-of-truth
+
 - Zones are **generated, never hand-edited.** An Ansible role reads
   **`lab/topology.yaml`** and templates the forward and reverse zone files from
   it — single source of truth, no drift.
@@ -201,6 +206,7 @@ a base name that is its primary service-facing identity:
   author only YAML.
 
 ### 5.5 Resolver & minimal `/etc/hosts`
+
 - Guests point their resolver at their side's infra node **by IP**
   (netplan/`resolv.conf`); `nsswitch` stays `files dns`.
 - **`/etc/hosts` holds only what must survive a DNS outage:**
@@ -216,6 +222,7 @@ a base name that is its primary service-facing identity:
   vs "we-want-to-measure-DNS-loss."**
 
 ### 5.6 Native HA client connectivity
+
 - **No VIP for Native HA.** Clients list the **three per-instance FQDNs** in
   `CONNAME`. Reject a single multi-A "service name" (MQ may not exhaustively try
   every A record). **CCDT deferred** to the future client-connectivity effort —

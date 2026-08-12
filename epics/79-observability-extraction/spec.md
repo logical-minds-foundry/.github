@@ -320,8 +320,7 @@ automation depends on **exposing every prompt as a CLI flag** —
 
 That dependency is **cross-org**, so it is a **loose, prose-level reference, not a
 `Blocked-by` link** (native sub-issue links do not cross orgs). The sequence:
-land #2382 → create the repo non-interactively → dogfoot the scripted path; if
-#2382 is not ready when we reach #82, fall back to the interactive wizard with a
+land #2382 → create the repo non-interactively → dogfoot the scripted path; if #2382 is not ready when we reach #82, fall back to the interactive wizard with a
 prepared answer table.
 
 ## 6. Discovery — other CLI-only / filesystem-only MQ metrics

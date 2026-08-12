@@ -26,11 +26,13 @@
 ### Task 1: Role variables + render-time template branch (with byte-identical syslog guard)
 
 **Files:**
+
 - Create: `tools/render-event-run.sh` (renders the wrapper for a given sink, exactly as Ansible would — used for the diff guard, for inspecting the file variant, and for quoting the exact script in the report)
 - Modify: `ansible/roles/mq-event-monitor/defaults/main.yml`
 - Modify: `ansible/roles/mq-event-monitor/templates/run.sh.j2`
 
 **Interfaces:**
+
 - Produces: role vars `mq_event_sink` (`syslog`|`file`, default `syslog`), `mq_event_file_dir`, `mq_event_data_file`, `mq_event_error_file`. The rendered `file` `run.sh` reads `DATA_FILE`/`ERROR_FILE` (from those vars) and `ERRLOG` (unchanged temp).
 - Consumes: existing vars `mq_event_amqsevt_bin`, `mq_event_syslog_tag`, `mq_event_sleep_secs`, `mq_event_open_retry_secs`, `mq_event_logger_max_size`, and `qmgr_name` (supplied at include time).
 
@@ -153,9 +155,11 @@ vrg-commit --type feat --scope events --message "sink-selectable event-monitor w
 ### Task 2: Sink-aware SERVICE definition
 
 **Files:**
+
 - Modify: `ansible/roles/mq-event-monitor/tasks/service.yml` (the "define + start the MQ event-monitor service" task)
 
 **Interfaces:**
+
 - Consumes: `mq_event_sink`, `mq_event_error_file`, `mq_event_data_file`, `mq_event_service_name`, `mq_event_run_dir`, `qmgr_name`.
 - Produces: a `DEFINE SERVICE` that, for `file`, adds `STDOUT`/`STDERR` → `.error` and a file-naming `DESCR`; for `syslog`, is unchanged.
 
@@ -209,9 +213,11 @@ vrg-commit --type feat --scope events --message "sink-aware event-monitor SERVIC
 ### Task 3: Host-prep — create the file-sink directory; re-scope the journald assert
 
 **Files:**
+
 - Modify: `ansible/roles/mq-event-monitor/tasks/main.yml`
 
 **Interfaces:**
+
 - Consumes: `mq_event_sink`, `mq_event_file_dir`.
 - Produces: on every failover-capable node, when `sink == file`, an mqm-owned `mq_event_file_dir`; the journald rate-limit assert applies only when `sink == syslog`.
 
@@ -249,10 +255,12 @@ vrg-commit --type feat --scope events --message "event-monitor host-prep: file-s
 ### Task 4: Parameterize the validation harness by sink
 
 **Files:**
+
 - Modify: `tools/validate-event-monitor-wrapper.sh`
 - Modify: `docs/reference/event-monitor-wrapper-validation.md`
 
 **Interfaces:**
+
 - Consumes: the deployed collector (either sink).
 - Produces: `validate-event-monitor-wrapper.sh <QM> [SERVICE] [SINK] [DATA_FILE] [ERROR_FILE]` — default `SINK=syslog` preserves the current 2-arg invocation; `SINK=file` requires `DATA_FILE`/`ERROR_FILE` and runs the four-assert bar.
 
@@ -345,6 +353,7 @@ uv run ansible-playbook site-nativeha.yml -e mq_event_sink=file
 ```
 
   Host-prep creates `/var/mqm/event-monitor/` (mqm-owned) on every instance; the active instance re-DEFINEs the SERVICE with `STDOUT`/`STDERR` → `<QM>.error` and starts it. `DEFINE … REPLACE` swaps the running collector to the file variant.
+
 - [ ] Confirm deployed: `DISPLAY SVSTATUS(MQ.EVENT.MONITOR)` reads `STATUS(RUNNING)`, `/var/mqm/event-monitor/<QM>.events.json` is being appended, `<QM>.error` carries the `run.sh[…] starting …` line. Record `Outcome: SUCCESS` on the deployment issue.
 
 ### Task 6 (operational — `validation`): the two corner cases + file-output check
@@ -367,6 +376,7 @@ uv run --project .. ansible <active-node> -b -m script \
 Blocked-by Task 6 (ships real evidence). Closed by a same-repo PR into `develop`.
 
 **Files:**
+
 - Create: `docs/reports/2026-07-29-mq-event-monitor-file-sink-resilient.md`
 - Modify: `docs/reports/2026-07-28-mq-event-monitor-resilient-service.md` (the "Choosing the sink" footnote)
 - Modify: `docs/reports/2026-07-28-mq-event-monitoring-to-file.md` (its file-sink-vs-syslog note, if it forwards to the footnote)
@@ -383,6 +393,7 @@ Blocked-by Task 6 (ships real evidence). Closed by a same-repo PR into `develop`
 ## Self-Review
 
 **Spec coverage:**
+
 - §3.1 selectable sink + render-time selection + byte-identical guard → Task 1 (Steps 3–7).
 - §3.2 file script contract (stdout→.json, say→stderr, shared per-run reason grep + `cat >&2` flush) → Task 1 (Steps 4–6).
 - §3.3 sink-aware SERVICE (STDOUT/STDERR→.error) → Task 2.

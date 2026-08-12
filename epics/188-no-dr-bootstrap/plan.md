@@ -24,10 +24,12 @@
 ### Task 1: `Stack.dr_groups` + effective-members helpers (`stacks.py`)
 
 **Files:**
+
 - Modify: `src/mqlab/stacks.py` (the `Stack` dataclass ~line 118-128; `lab_stacks()` ~line 206-218; add helpers near `stack_members` ~line 251)
 - Test: `tests/test_stacks.py`
 
 **Interfaces:**
+
 - Produces: `Stack.dr_groups: list[str]`; `stack_dr_hosts(name: str) -> list[str]`; `stack_members_effective(name: str, *, no_dr: bool) -> list[str] | None`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -123,9 +125,11 @@ vrg-commit --type feat --scope bootstrap --message "Stack.dr_groups + effective-
 ### Task 2: topology marker for `nativeha-ubuntu` (`lab/topology.yaml`)
 
 **Files:**
+
 - Modify: `lab/topology.yaml` (the `stacks: nativeha-ubuntu:` block — add `dr_groups`)
 
 **Interfaces:**
+
 - Consumes: nothing. Produces: the data Task 1's helpers read (its tests already assert this value, so they now pass against real data).
 
 - [ ] **Step 1: Add the marker**
@@ -153,10 +157,12 @@ vrg-commit --type feat --scope bootstrap --message "declare dr_groups for native
 ### Task 3: `--no-dr` flag + fail-loud guard (`cli.py`)
 
 **Files:**
+
 - Modify: `src/mqlab/cli.py` (the `bootstrap` command ~line 2094; `_bootstrap_run` ~line 2010)
 - Test: `tests/test_cli_bootstrap.py`
 
 **Interfaces:**
+
 - Consumes: `Stack.dr_groups` (Task 1).
 - Produces: `bootstrap(..., no_dr: bool)`; `_bootstrap_run(stack_name, *, only, from_phase, step, no_dr: bool = False)`.
 
@@ -225,11 +231,13 @@ vrg-commit --type feat --scope bootstrap --message "bootstrap --no-dr flag + fai
 ### Task 4: phases honor `no_dr` (`phases.py`)
 
 **Files:**
+
 - Modify: `src/mqlab/phases.py` — the four builders (`_net_build_steps` 181, `_vms_build_steps` 298, `_provision_build_steps` 432, `_observe_build_steps` 504); the `Phase` invocation in the run loop (~line 621); the shared member lookup (~line 145)
 - Modify: `src/mqlab/cli.py` — `_bootstrap_run` passes `no_dr` into the phase run
 - Test: `tests/test_phases.py`
 
 **Interfaces:**
+
 - Consumes: `stack_members_effective` (Task 1); the `no_dr` bool (Task 3).
 - Produces: builders that accept `*, no_dr: bool = False`; `provision` step whose ansible cmd includes `dr_enabled=false` only under `no_dr`.
 
@@ -313,9 +321,11 @@ vrg-commit --type feat --scope bootstrap --message "phases honor --no-dr: site-A
 ### Task 5: provision-playbook DR gates (`site-nativeha-ubuntu.yml`)
 
 **Files:**
+
 - Modify: `ansible/site-nativeha-ubuntu.yml` (the authz play `hosts:` ~line 58; the DR `import_playbook` ~line 241)
 
 **Interfaces:**
+
 - Consumes: the `dr_enabled` extra-var (Task 4). Default `true` preserves current behaviour exactly.
 
 - [ ] **Step 1: Gate the authz play host pattern**
