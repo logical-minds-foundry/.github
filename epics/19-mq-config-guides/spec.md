@@ -69,12 +69,14 @@ To stay shareable into a scanned corporate environment, guides use **declarative
 configuration only**:
 
 **Allowed:**
+
 - `qm.ini` / `mqs.ini` stanza blocks
 - MQSC `DEFINE` / `ALTER` statements
 - `setmqaut` authority statements
 - Parameter = value tables (setting, value, default, rationale)
 
 **Not allowed:**
+
 - Shell, Python, Ansible, or any imperative script
 - `runmqsc` pipelines or other command-orchestration snippets
 
@@ -96,6 +98,7 @@ before the trees.
 *last validated in lab* date · related guides.
 
 **Body — the how-to (target 2–3 pages):**
+
 1. **Purpose & audience** — what this configures and who needs it
 2. **Scope & version floor** — what is in/out; MQ version applicability
 3. **Recommendation** — approaches ranked strongest → weakest, each with its
@@ -105,6 +108,7 @@ before the trees.
 6. **What stays / caveats** — what cannot be turned off, known sharp edges
 
 **Appendices (A…N, supporting only):**
+
 - **A — Full parameter reference.** Every setting, value, default, rationale.
 - **B — Alternatives & tradeoffs in depth.** The evidence behind §3's ranking.
 - **C — Complete configuration examples.** The exhaustive stanza / MQSC blocks.
@@ -132,7 +136,9 @@ material pads the front.
 ## 6. Epic task breakdown
 
 ### Task 0 — Guide standard & template (foundation)
+
 Establish the mold before mass-producing:
+
 - Write the template and authoring conventions: the two-layer structure, the
   content-boundary rule (§3), the recommendation-ranking convention (§2).
 - Create the `docs/site/docs/guides/` tree and the DocsTree "Guides" index page +
@@ -143,6 +149,7 @@ Establish the mold before mass-producing:
   template both delivers the first real guide and validates the mold in one pass.
 
 ### Tasks 1–3 — Flagship guides
+
 1. **Prometheus / MQ-metrics configuration.** The statistics and accounting
    settings — QM-wide and per-object — that must be coherent for the collectors
    and dashboards; the scrape-side label contract described in prose.
@@ -163,7 +170,9 @@ Establish the mold before mass-producing:
 > story once both land.
 
 ### Backlog (seeded, not yet committed)
+
 Seed as tasks so the epic has visible runway:
+
 - HA-topology selection (Native HA vs RDQM vs Multi-instance) — flagship
   recommendation-ordered guide
 - OS platform selection (RHEL vs Ubuntu)
@@ -199,6 +208,7 @@ Seed as tasks so the epic has visible runway:
 ## 8. Definition of done (per guide)
 
 A guide is done when:
+
 1. It follows the template (§4) — two-layer, front-loaded.
 2. It respects the content boundary (§3) — no code.
 3. It is generic — no lab-specific values.

@@ -169,7 +169,7 @@ mid-epic discovery. Formation (`main.yml`) is untouched.
 
 ### 4.5 Kernel: no pin (refining #70's assumption)
 
-#70's spec (§4.3, §5.3) speculated `mq-nativeha-rhel9` would be a *leading-edge
+Issue #70's spec (§4.3, §5.3) speculated `mq-nativeha-rhel9` would be a *leading-edge
 kernel* box, framed as "the two RHEL9 flavors differ by kernel." **Native HA's raft
 replication uses no kernel module**, so there is **no pin to satisfy and no kernel
 flavor to choose** — cut 1 simply reuses the stock `rhel/9.6-x86_64` base (the same

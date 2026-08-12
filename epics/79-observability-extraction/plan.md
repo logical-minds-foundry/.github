@@ -11,6 +11,7 @@ dashboards into a standalone, dual-packaged (`.rpm` + `.deb`) product,
 `mq-resiliency-observability`, and have the lab dogfood the published artifact.
 
 **Architecture:** A new public repo holds a pure-Python-stdlib package (collectors
+
 + systemd timers + a `render-dashboards` generator) plus a format-agnostic
 packaging core with per-format adapters. Each collector is lifted from the member
 repo, parameterized, and driven through the roadmap's six-step migration gate.
@@ -22,28 +23,28 @@ Grafana dashboard JSON; the repo's CI (`vrg-validate`, 100% branch coverage).
 
 ## Global Constraints
 
-- **Language:** collectors are **stdlib-only** — no PyMQI, no compiled deps, no
++ **Language:** collectors are **stdlib-only** — no PyMQI, no compiled deps, no
   third-party runtime imports. (Verified for `nativehastate`/`rdqmstate`/
   `clusterstate`.)
-- **License:** MIT. **Versioning:** semver from `0.x`; `1.0` only after the lab
++ **License:** MIT. **Versioning:** semver from `0.x`; `1.0` only after the lab
   dogfoods through a cold rebuild.
-- **Coverage:** pure logic to **100% branch** (repo gate). Validation is
++ **Coverage:** pure logic to **100% branch** (repo gate). Validation is
   `vrg-container-run -- vrg-validate` only.
-- **QM-name source of truth:** derive dashboard/profile QM names from
++ **QM-name source of truth:** derive dashboard/profile QM names from
   `stacks.py` semantics (`{short}APP`/`{short}SVC`) — never a competing source.
-- **Ownership boundary:** configure only what we own; declare-and-loudly-verify
++ **Ownership boundary:** configure only what we own; declare-and-loudly-verify
   the rest; never edit `qm.ini`, never restart a QM, never mutate node_exporter's
   config. Fail loud; no stale panels; no silent failures.
-- **Packaging:** `.rpm` **and** `.deb` from one source; format-agnostic core +
++ **Packaging:** `.rpm` **and** `.deb` from one source; format-agnostic core +
   adapters designed up front, extensible to a third format.
-- **Publishing a release is human-gated** — no task performs a publish; the agent
++ **Publishing a release is human-gated** — no task performs a publish; the agent
   prepares it and stops.
 
 ---
 
 ## New-repo file structure (`mq-resiliency-observability`)
 
-```
+```text
 src/mqro/
   collectors/
     base.py          # atomic textfile write (temp+rename), `_m()` line formatter,
@@ -82,15 +83,15 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 
 **Repo:** n/a (creates the repo). **Gate step:** precondition to all.
 
-- **Deliverable:** the public repo exists, Vergil-scaffolded (MIT, `0.1.0`,
++ **Deliverable:** the public repo exists, Vergil-scaffolded (MIT, `0.1.0`,
   Python), empty of product code.
-- **Loose cross-org dependency:** `vergil-project/vergil-tooling#2382` (scripted
++ **Loose cross-org dependency:** `vergil-project/vergil-tooling#2382` (scripted
   `vrg-github-repo-init`). Prose reference, not a `Blocked-by` link. Sequence:
   land #2382 → create non-interactively; **fallback** = interactive wizard with a
   prepared answer table if #2382 isn't ready.
-- **Includes:** the final naming pass (spec §11 open question) — resolve the
++ **Includes:** the final naming pass (spec §11 open question) — resolve the
   placeholder name *before* creation.
-- **Acceptance:** repo builds/lints green empty; branch protection + CI active.
++ **Acceptance:** repo builds/lints green empty; branch protection + CI active.
 
 ---
 
@@ -100,25 +101,25 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T0. **Gate step:** 2 (build).
 
-- **Files:** `packaging/core/*`, `packaging/rpm/*`, `packaging/deb/*` (stub),
++ **Files:** `packaging/core/*`, `packaging/rpm/*`, `packaging/deb/*` (stub),
   `packaging/units/*`, `packaging/scripts/*`, CI build job.
-- **Deliverable:** a declarative package description (files, install paths,
++ **Deliverable:** a declarative package description (files, install paths,
   systemd units, dependencies, metadata) that the **RPM adapter** turns into a
   `.rpm` for a trivial payload; the **Debian adapter is forked-and-stubbed** —
   present at every divergence with a `TODO(deb)` marker so slice-2 fills it in
   without reshaping the core.
-- **Interfaces — Produces:** a `build(description, fmt)` entry point later tasks
++ **Interfaces — Produces:** a `build(description, fmt)` entry point later tasks
   feed their collector/units into; `fmt ∈ {rpm, deb}` (deb raises
   `NotImplementedError("TODO(deb)")` for now).
-- **Install/uninstall scripts (§3.6):** `%post`/`postinst` **fail loud** if the
++ **Install/uninstall scripts (§3.6):** `%post`/`postinst` **fail loud** if the
   configured textfile directory is unspecified or not writable by the service
   user; `%postun`/`postrm` stop+disable timers and remove only our own artifacts.
   (Wired to a real payload in T4; here they exist and are unit-tested against a
   trivial payload.)
-- **Tests:** building the trivial payload yields an installable `.rpm`; the
++ **Tests:** building the trivial payload yields an installable `.rpm`; the
   `%post` gate errors on an unwritable/absent dir; the `deb` path raises the
   stubbed marker; adapter selection is covered.
-- **Acceptance:** `.rpm` builds in CI; deb stub is explicit, not silent.
++ **Acceptance:** `.rpm` builds in CI; deb stub is explicit, not silent.
 
 ---
 
@@ -128,83 +129,83 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T0. **Gate step:** 1.
 
-- **Files:** create `src/mqro/collectors/base.py`, `src/mqro/collectors/nativeha.py`,
++ **Files:** create `src/mqro/collectors/base.py`, `src/mqro/collectors/nativeha.py`,
   `src/mqro/config.py`, `tests/collectors/test_nativeha.py`,
   `tests/collectors/test_base.py`. Lift from member `src/mqlab/nativehastate.py`.
-- **Scrub:** remove lab assumptions; the QM name and textfile directory become
++ **Scrub:** remove lab assumptions; the QM name and textfile directory become
   **profile/config inputs** (no hardcoded `NHARAPP`, no assumed path); keep
   stdlib-only; preserve `dspmq -o nativeha` parsing and the `cluster_nha_*`
   families verbatim (contract-preserving).
-- **Interfaces — Produces:** `collect_nativeha(cfg) -> list[Metric]`;
++ **Interfaces — Produces:** `collect_nativeha(cfg) -> list[Metric]`;
   `base.write_textfile(dir, name, metrics)` (atomic temp+rename);
   `base.emit_last_write_timestamp(...)`. **Consumes:** `config.Profile`.
-- **Tests:** parse fixtures (captured `dspmq -o nativeha -x/-g` text, incl. the
++ **Tests:** parse fixtures (captured `dspmq -o nativeha -x/-g` text, incl. the
   `Unknown`/non-numeric tolerance from member #390); atomic write; stale-write
   never republishes; **100% branch**.
-- **Acceptance:** `cluster_nha_*` families byte-compatible with the lab's output
++ **Acceptance:** `cluster_nha_*` families byte-compatible with the lab's output
   for the same input.
 
 ### Task 3: Detection framework (precedence + exclusion) — Native HA arm
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T2. **Gate step:** 1.
 
-- **Files:** `src/mqro/detect.py`, `tests/test_detect.py`.
-- **Deliverable:** the activation resolver (spec §3.2): explicit config is the
++ **Files:** `src/mqro/detect.py`, `tests/test_detect.py`.
++ **Deliverable:** the activation resolver (spec §3.2): explicit config is the
   backbone; auto-detect is a convenience. Resolution order **RDQM → Native HA →
   standalone Pacemaker**, with RDQM suppressing generic Pacemaker. This task lands
   the **framework + the Native HA resolver + config override**; the RDQM and
   Pacemaker resolvers arrive with their collectors (T8, T9).
-- **Interfaces — Produces:** `resolve(probes, config) -> set[Collector]`;
++ **Interfaces — Produces:** `resolve(probes, config) -> set[Collector]`;
   probe seams `probe_nativeha()`, `probe_rdqm()`, `probe_pacemaker()` (RDQM/pcmk
   return stubs until T12/T13).
-- **Tests:** Native HA env activates `nativeha`; config override wins; an
++ **Tests:** Native HA env activates `nativeha`; config override wins; an
   unresolvable/unknown combination fails loud; the RDQM-both-probes case is
   asserted here as a **table stub** and completed in T12.
-- **Acceptance:** no path silently guesses; config always overrides.
++ **Acceptance:** no path silently guesses; config always overrides.
 
 ### Task 4: Package the Native HA collector — timer, textfile boundary, RPM
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T1, T2, T3. **Gate step:** 2.
 
-- **Files:** `packaging/units/mqro-nativeha.{service,timer}`, wire the real
++ **Files:** `packaging/units/mqro-nativeha.{service,timer}`, wire the real
   payload (T2 collector + T3 detect) into the T1 core; `tests/packaging/*`.
-- **Deliverable:** a `.rpm` that installs the Native HA collector, its ~5s timer,
++ **Deliverable:** a `.rpm` that installs the Native HA collector, its ~5s timer,
   the install-time textfile-dir gate, the runtime self-check, and clean uninstall.
-- **Tests:** install into a container/VM fixture → timer active, `.prom` appears
++ **Tests:** install into a container/VM fixture → timer active, `.prom` appears
   in the configured dir; `%post` fails loud on a bad dir; `%postun` removes our
   units + our `.prom`, leaves the dir + foreign files intact.
-- **Acceptance:** `rpm -i`/`rpm -e` round-trips clean; metrics scrape.
++ **Acceptance:** `rpm -i`/`rpm -e` round-trips clean; metrics scrape.
 
 ### Task 5: Metrics contract module + consistency test (Native HA subset)
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T2. **Gate step:** 2.
 
-- **Files:** `src/mqro/contract.py`, `tests/test_contract.py`, `docs/README.md`
++ **Files:** `src/mqro/contract.py`, `tests/test_contract.py`, `docs/README.md`
   (contract + example scrape/relabel snippet + the **required scrape-side labels**
   and **textfile-boundary** prerequisites).
-- **Deliverable:** the versioned `cluster_nha_*` emitted-families half of the
++ **Deliverable:** the versioned `cluster_nha_*` emitted-families half of the
   contract, plus the CI **consistency test harness** (every metric a board queries
   is one a collector emits — exercised fully once boards land in T14).
-- **Tests:** the contract lists exactly what `collect_nativeha` emits; the harness
++ **Tests:** the contract lists exactly what `collect_nativeha` emits; the harness
   fails if a listed family is not emitted.
-- **Acceptance:** README leads with the label + textfile-dir traps.
++ **Acceptance:** README leads with the label + textfile-dir traps.
 
 ### Task 6: CI in the new repo (build + test + contract)
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T4, T5. **Gate step:** 2.
 
-- **Deliverable:** CI runs the test suite (100% branch), builds the `.rpm`, runs
++ **Deliverable:** CI runs the test suite (100% branch), builds the `.rpm`, runs
   the contract-consistency test, on every PR.
-- **Acceptance:** green CI on the Native HA slice.
++ **Acceptance:** green CI on the Native HA slice.
 
 ### Task 7: Publish `0.1.0` (human-gated) *(operational — release)*
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T6. **Gate step:** 3.
 
-- **Deliverable:** the first published `.rpm` on the chosen channel (spec §11 open
++ **Deliverable:** the first published `.rpm` on the chosen channel (spec §11 open
   question — resolved in the packaging sub-brainstorm; GitHub Releases is the
   likely first step).
-- **Human-gated:** the agent prepares the release and **stops**; a human tags and
++ **Human-gated:** the agent prepares the release and **stops**; a human tags and
   publishes. Not PR-workable.
 
 ### Task 8: Dogfood — lab installs the published Native HA collector
@@ -212,21 +213,21 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 **Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T7. **Gate step:** 4.
 *(deployment-kind operational task)*
 
-- **Files:** modify `ansible/roles/nativeha-state` (and/or a new install role) to
++ **Files:** modify `ansible/roles/nativeha-state` (and/or a new install role) to
   **install the published `.rpm`** on the RHEL Native HA node instead of deploying
   the in-repo script; feed the profile (QM name, textfile dir) from `stacks.py`.
-- **Note:** slice 1 dogfoods the **RHEL** Native HA arm (`.rpm`); the **Ubuntu**
++ **Note:** slice 1 dogfoods the **RHEL** Native HA arm (`.rpm`); the **Ubuntu**
   Native HA arm waits for the `.deb` adapter (Task 11).
-- **Acceptance:** the RHEL Native HA node runs the packaged collector; dashboards
++ **Acceptance:** the RHEL Native HA node runs the packaged collector; dashboards
   read live.
 
 ### Task 9: Delete the in-lab Native HA collector copy
 
 **Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T8. **Gate step:** 5.
 
-- **Files:** remove `src/mqlab/nativehastate.py` and the in-repo deploy path of
++ **Files:** remove `src/mqlab/nativehastate.py` and the in-repo deploy path of
   `ansible/roles/nativeha-state`; the deletion proves no silent fallback.
-- **Acceptance:** lab has no local copy; provisioning uses only the published
++ **Acceptance:** lab has no local copy; provisioning uses only the published
   artifact.
 
 ### Task 10 *(= filed validation #644)*: Install validation — `.rpm` on an individual RHEL VM
@@ -234,7 +235,7 @@ Source of each lift (member repo `mq-resiliency-lab-for-linux`):
 **Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T8, T12, T13 (all
 rpm-format collectors dogfooded). **Gate step:** 6 (lightweight). *(validation-kind)*
 
-- **Deliverable:** the published `.rpm` installs and runs on a **single ad-hoc
++ **Deliverable:** the published `.rpm` installs and runs on a **single ad-hoc
   RHEL VM build** — *not* a full lab rebuild — with timers active, `.prom`
   present, and metrics scraping; `Outcome: SUCCESS` recorded as a comment. This is
   the fast per-format package check; the whole-lab integration is **Task 19**.
@@ -247,47 +248,47 @@ rpm-format collectors dogfooded). **Gate step:** 6 (lightweight). *(validation-k
 
 **Repo:** `mq-resiliency-observability`. **Depends:** T4. **Gate step:** 2.
 
-- **Deliverable:** the `deb` adapter builds a `.deb` from the same core
++ **Deliverable:** the `deb` adapter builds a `.deb` from the same core
   description; `postinst`/`postrm` mirror the RPM gate + cleanup.
-- **Tests:** `.deb` builds in CI; install/uninstall round-trips on Ubuntu.
-- **Acceptance:** both formats build from one source; "done" now reachable.
++ **Tests:** `.deb` builds in CI; install/uninstall round-trips on Ubuntu.
++ **Acceptance:** both formats build from one source; "done" now reachable.
 
 ### Task 12: RDQM collector — extract, detection precedence, package, dogfood
 
 **Repo:** both. **Depends:** T2 (base/drbd), T3, T11. **Gate step:** 1–6.
 
-- **Files:** `src/mqro/collectors/drbd.py` (extract `parse_drbd`),
++ **Files:** `src/mqro/collectors/drbd.py` (extract `parse_drbd`),
   `src/mqro/collectors/rdqm.py` (from `rdqmstate.py`); complete `probe_rdqm()` +
   the **RDQM-suppresses-Pacemaker** precedence (spec §3.2); package (`.rpm` for
   RHEL RDQM); dogfood + delete in-lab copy (`src/mqlab/rdqmstate.py`,
   `ansible/roles/rdqm-state`).
-- **Tests:** RDQM env activates `rdqm` and **not** `cluster` even though `crm_mon`
++ **Tests:** RDQM env activates `rdqm` and **not** `cluster` even though `crm_mon`
   answers; `cluster_rdqm_*`/`cluster_drbd_*` contract-preserving; 100% branch.
-- **Acceptance:** RDQM node scrapes the packaged collector; no double emission.
++ **Acceptance:** RDQM node scrapes the packaged collector; no double emission.
 
 ### Task 13: Pacemaker/DRBD collector — extract, detection, package, dogfood
 
 **Repo:** both. **Depends:** T2, T3, T12 (shared `drbd.py`). **Gate step:** 1–6.
 
-- **Files:** `src/mqro/collectors/cluster.py` (from `clusterstate.py`); complete
++ **Files:** `src/mqro/collectors/cluster.py` (from `clusterstate.py`); complete
   `probe_pacemaker()` (standalone Pacemaker, not-RDQM); package; dogfood; delete
   `src/mqlab/clusterstate.py` + `ansible/roles/cluster-state`.
-- **Tests:** standalone Pacemaker activates `cluster`; `cluster_*`/`cluster_drbd_*`
++ **Tests:** standalone Pacemaker activates `cluster`; `cluster_*`/`cluster_drbd_*`
   contract-preserving; 100% branch.
-- **Acceptance:** Pacemaker arm scrapes the packaged collector.
++ **Acceptance:** Pacemaker arm scrapes the packaged collector.
 
 ### Task 14: `render-dashboards` generator + portable dashboards
 
 **Repo:** both. **Depends:** T5, T12, T13. **Gate step:** 1–2 (+dogfood).
 
-- **Files:** `src/mqro/dashboards/render.py`, `src/mqro/dashboards/boards/*`;
++ **Files:** `src/mqro/dashboards/render.py`, `src/mqro/dashboards/boards/*`;
   de-hardcode the member builders `dashboard.py`/`clusterboard.py`/
   `messagingboard.py`/`qmboard.py`. Profile from `stacks.py` semantics.
-- **Order:** stock-only boards first (`qmboard`/`messagingboard` — no collector
++ **Order:** stock-only boards first (`qmboard`/`messagingboard` — no collector
   dependency), then the cluster/HA boards on the contract.
-- **Tests:** the **full** contract-consistency test (every panel metric is
++ **Tests:** the **full** contract-consistency test (every panel metric is
   emitted); rendering is deterministic; no hardcoded QM/resource names.
-- **Acceptance:** boards render from a profile; lab repoints to the published
++ **Acceptance:** boards render from a profile; lab repoints to the published
   generator; in-lab builders deleted.
 
 ### Task 15 *(= filed validation #645)*: Install validation — `.deb` on an individual Ubuntu VM
@@ -295,7 +296,7 @@ rpm-format collectors dogfooded). **Gate step:** 6 (lightweight). *(validation-k
 **Repo:** `mq-resiliency-lab-for-linux` (member). **Depends:** T11 (deb adapter) +
 the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 
-- **Deliverable:** the published `.deb` installs and runs on a **single ad-hoc
++ **Deliverable:** the published `.deb` installs and runs on a **single ad-hoc
   Ubuntu VM build** — timers active, metrics scraping; `Outcome: SUCCESS`. Fast
   per-format package check; the whole-lab integration is **Task 19**.
 
@@ -307,7 +308,7 @@ the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 
 **Repo:** `.github` (a report doc) or member `docs/`. **Depends:** none.
 
-- **Deliverable:** a written, prioritized candidate list (FFST `/var/mqm/errors`
++ **Deliverable:** a written, prioritized candidate list (FFST `/var/mqm/errors`
   **count + oldest-age** at the top; `dspmqtrn`, `dspmqver`/`dspmqinst`,
   `dmpmqcfg`, `dspmqspl`). **No collector is built here** — building the top
   candidate is spun into the follow-on brainstorm (#81).
@@ -316,7 +317,7 @@ the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 
 **Repo:** `.github`. **Depends:** T1 (learnings), before epic close.
 
-- **Deliverable:** resolve spec §11 open questions — builder (`nfpm` vs `fpm` vs
++ **Deliverable:** resolve spec §11 open questions — builder (`nfpm` vs `fpm` vs
   native), publish channel, and the **shape of the Vergil-toolkit extraction**
   (forward-engineered here, extracted by a follow-on epic).
 
@@ -324,7 +325,7 @@ the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 
 **Repo:** member `docs/` or handed off. **Depends:** T14. Gates nothing.
 
-- **Deliverable:** a one-off markdown: manual, no-AI, UI-first dashboard rebuild
++ **Deliverable:** a one-off markdown: manual, no-AI, UI-first dashboard rebuild
   in a from-scratch Grafana, incl. a **JSON-import availability test** + UI-only
   fallback. Not a product doc; may be pulled into its own brainstorm.
 
@@ -334,7 +335,7 @@ the deb-format dogfoods. **Gate step:** 6 (lightweight). *(validation-kind)*
 (#645), T14 (dashboards). **Gate step:** 6 (integration). *(validation-kind — to
 be filed under the epic, blocked-by #644, #645)*
 
-- **Deliverable:** a **full VM cold rebuild of the entire lab** comes up
++ **Deliverable:** a **full VM cold rebuild of the entire lab** comes up
   **one-pass** with the published component installed across the mixed
   RHEL/Ubuntu fleet — one bring-up that inherently exercises both `.rpm` and
   `.deb` — with dashboards live; `Outcome: SUCCESS` recorded. This is the final
@@ -343,9 +344,9 @@ be filed under the epic, blocked-by #644, #645)*
 
 ### Bookends *(already filed)*
 
-- **#643** documentation review (multi-repo: lab `docs/site` + org `docs` repo if
++ **#643** documentation review (multi-repo: lab `docs/site` + org `docs` repo if
   implicated; one PR per repo).
-- **#81** follow-on brainstorm (successor epics: **packaging-tooling extraction to
++ **#81** follow-on brainstorm (successor epics: **packaging-tooling extraction to
   Vergil**, generic event handler for FFST-as-event, `mq-resiliency-logging`, the
   §6 metric builds).
 
@@ -353,7 +354,7 @@ be filed under the epic, blocked-by #644, #645)*
 
 ## Dependency graph (task → blocked-by)
 
-```
+```text
 T0(#82) ─┬─ T1 ─┬───────────────── T4 ─ T6 ─ T7 ─ T8 ─ T9
          │      │                  │
          ├─ T2 ─┼─ T3 ─────────────┘
@@ -369,17 +370,17 @@ T0(#82) ─┬─ T1 ─┬───────────────── T
 
 ## Self-review — spec coverage
 
-- §2 charter/scope → T2/T12/T13 (three collectors, stdlib); non-goals honored
++ §2 charter/scope → T2/T12/T13 (three collectors, stdlib); non-goals honored
   (no net/app collectors, no logging, no event handler, no MQI).
-- §3.1 package shape → T1/T4. §3.2 detection precedence → T3/T12/T13.
-- §3.3 contract (both halves) → T5/T14 + README. §3.4 dashboard generator → T14
++ §3.1 package shape → T1/T4. §3.2 detection precedence → T3/T12/T13.
++ §3.3 contract (both halves) → T5/T14 + README. §3.4 dashboard generator → T14
   (profile from `stacks.py`).
-- §3.5 dual-format packaging up front → T1 (core+rpm+deb stub) / T11 (deb).
-- §3.6 textfile boundary + clean removal → T1 scripts, T4 wiring, tests in T4.
-- §4 build order + six-step gate → T2–T10 (slice 1), T11–T15 (slice 2+); per-format
++ §3.5 dual-format packaging up front → T1 (core+rpm+deb stub) / T11 (deb).
++ §3.6 textfile boundary + clean removal → T1 scripts, T4 wiring, tests in T4.
++ §4 build order + six-step gate → T2–T10 (slice 1), T11–T15 (slice 2+); per-format
   install validation → T10(#644)/T15(#645); full-lab cold-rebuild integration → T19.
-- §5 repo bootstrap + cross-org dep → T0(#82). §6 discovery-only → T16.
-- §7 adopter playbook → T18. §9 testing/DoD → per-task tests + T6 CI + T10/T15.
-- §10 follow-on → #81. §11 open questions → T0 (naming), T17 (packaging/publish).
++ §5 repo bootstrap + cross-org dep → T0(#82). §6 discovery-only → T16.
++ §7 adopter playbook → T18. §9 testing/DoD → per-task tests + T6 CI + T10/T15.
++ §10 follow-on → #81. §11 open questions → T0 (naming), T17 (packaging/publish).
 
 No spec requirement is left without a task.

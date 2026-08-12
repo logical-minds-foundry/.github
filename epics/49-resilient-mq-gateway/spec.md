@@ -434,6 +434,7 @@ work. (Full analysis in the lab's `docs/scale-analysis.md`.)
 ## 11. Open questions for the application team (the deliverable's payload)
 
 **Inbound path (the vaguest area):**
+
 1. When a confirmation lands on the reply queue and is logged — **then what**?
    Stored only, or forwarded on?
 2. **How does an app receive an inbound message through the gateway** — push,
@@ -535,6 +536,7 @@ fallback (§6). Full write-up in the lab's `docs/proof-of-concept.md`.
 Out of scope for Phase 1: choosing a final rung (the app team's call, informed by
 the demonstration). **Verify-before-build items** to resolve early (they do not
 block the design, but do not build on them unpromised):
+
 - **Streaming-queue archive on the box** (§6/§8, the **primary** now) — confirm
   on the live queue manager: `STRMQOS(MUSTDUP)` atomicity (a copy failure fails
   the original put); the direct queue-to-queue copy retains the MsgId (research

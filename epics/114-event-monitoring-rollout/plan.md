@@ -26,6 +26,7 @@
 Establish the consolidated role the other tasks include. After this task the role has two entry points (`main` = host-prep, `service` = MQSC), and `mq-qmgr` carries no private event logic. **`SVCQM` behaviour is unchanged** — the acceptance gate.
 
 **Files:**
+
 - Modify: `ansible/roles/mq-event-monitor/tasks/main.yml` (reduce to host-prep)
 - Create: `ansible/roles/mq-event-monitor/tasks/service.yml` (the MQSC half)
 - Modify: `ansible/roles/mq-event-monitor/defaults/main.yml` (add `mq_event_perf_queues`)
@@ -33,6 +34,7 @@ Establish the consolidated role the other tasks include. After this task the rol
 - Modify: `ansible/roles/mq-qmgr/defaults/main.yml` (remove the moved default)
 
 **Interfaces:**
+
 - Produces: `mq-event-monitor` with two entry points. `include_role: {name: mq-event-monitor}` (default `main`) = **host-prep**: asserts `amqsevt` + the journald drop-in present, installs `{{ mq_event_run_dir }}/run.sh`. `include_role: {name: mq-event-monitor, tasks_from: service}` = **MQSC**: enables the event classes on `{{ qmgr_name }}`, sets per-queue perf on `{{ mq_event_perf_queues }}`, defines + starts `{{ mq_event_service_name }}`. Both require `qmgr_name` in scope; `service` also reads `mq_event_perf_queues` (default `[]`).
 - Consumes: nothing new — `mq-diag-logging` (the drop-in) must already have run on the node.
 
@@ -214,11 +216,13 @@ vrg-pr-workflow report-ready --issue <T1_ISSUE> --title "refactor(events): conso
 **Blocked-by T1.** `mq-nativeha` is OS-agnostic, so one host-prep include covers both arms; the MQSC half hangs off each arm's existing active-instance MQSC block.
 
 **Files:**
+
 - Modify: `ansible/roles/mq-nativeha/tasks/main.yml` (host-prep include, per node)
 - Modify: `ansible/site-nativeha.yml` (MQSC include at the active-instance block)
 - Modify: `ansible/site-nativeha-ubuntu.yml` (same, the Debian twin)
 
 **Interfaces:**
+
 - Consumes: `mq-event-monitor` (`main` + `service`) from T1; each arm's active-instance resolution (`site-nativeha.yml` "find the active Native HA instance" + the `run_once` MQSC block).
 - Produces: `NHARAPP` and `NHAUAPP` fully instrumented; wrapper present on all six `nha-rhel-*` / `nha-ubuntu-*` nodes.
 
@@ -304,9 +308,11 @@ vrg-pr-workflow report-ready --issue <T2_ISSUE> --title "feat(events): event mon
 **Blocked-by T1.** The Pacemaker arm runs the QM on a shared LUN owned by one node; the role runs on all `pcmk_a` nodes. Wrapper on all nodes; MQSC in the existing `run_once` first-time creation block (on the LUN).
 
 **Files:**
+
 - Modify: `ansible/roles/mq-pcmk-qmgr/tasks/main.yml`
 
 **Interfaces:**
+
 - Consumes: `mq-event-monitor` (T1); the role's existing `run_once` first-time `apply MQSC config` block (where the QM is started on the LUN owner and MQSC applied).
 - Produces: `PCMKAPP` instrumented; wrapper on all `pcmk_a` nodes.
 
@@ -376,9 +382,11 @@ vrg-pr-workflow report-ready --issue <T3_ISSUE> --title "feat(events): event mon
 **Blocked-by T1. Sequenced last, deliberately.** Unlike T2/T3 the rdqm QM-creation seam is **script-based** (`rdqm-qm-create.sh` + `site-rdqm.yml` includes) and was recently rewritten to IBM's coordinated one-`crtmqm`-per-site model (`#561`, `#582`, `#559`, `#591`, `#593`). Do **not** assume it mirrors the role-based arms — validate every step against the current `site-rdqm.yml`.
 
 **Files:**
+
 - Modify: `ansible/site-rdqm.yml` (host-prep on all `rdqm_a`; MQSC gated `when: rdqm_is_active`)
 
 **Interfaces:**
+
 - Consumes: `mq-event-monitor` (T1); the `rdqm-active-node` role (sets `rdqm_is_active`), whose `when: rdqm_is_active` gate already carries QM-level includes (e.g. `mq-diag-logging tasks_from: qmini`).
 - Produces: `RDQMAPP` instrumented; wrapper on all `rdqm_a` nodes.
 
@@ -453,6 +461,7 @@ vrg-pr-workflow report-ready --issue <T4_ISSUE> --title "feat(events): event mon
 ## Self-Review
 
 **Spec coverage:**
+
 - Consolidated `mq-event-monitor` role (spec 3.1) → T1 Steps 1–3. ✅
 - De-dup `mq-qmgr`, SVCQM unchanged (spec 3.2 / acceptance) → T1 Steps 4, 6. ✅
 - Wire into every seam (spec 3.2 / scope table) → T2 (nativeha ×2), T3 (pcmk), T4 (rdqm). ✅

@@ -71,7 +71,7 @@ consuming them on dashboards — each its own PR.
 
 ## 3. Architecture overview
 
-```
+```text
                  (per queue manager)
   ┌──────────────────────────────────────────────┐
   │  Queue manager (bindings)                      │
@@ -149,7 +149,7 @@ the workload that would generate high event rates).
 > events) is **z/OS-only** (footnote 2, "Valid only on z/OS") and is deliberately
 > excluded — issuing it on a Linux QM would make `runmqsc` reject the whole `ALTER`.
 > There is **no `COMMEV`** attribute; earlier drafts listed one in error.
-
+>
 > **`LOGGEREV` excluded (build correction).** `LOGGEREV(ENABLED)` is valid only on
 > **linear-logging** queue managers; the lab's QMs use **circular** logging, where
 > MQ rejects it with **`AMQ8518E`**. Because `ALTER QMGR` is atomic, that one
@@ -185,7 +185,7 @@ nested quotes into an MQSC `STARTARG` is a known quoting minefield in this repo
 the natural home for the buffering fix (§5.3 build-time note). It is a *launcher*,
 not a PCF parser, so the "config, not code" thesis holds.
 
-```
+```text
 DEFINE SERVICE(MQ.EVENT.MONITOR) REPLACE +
   CONTROL(QMGR)  SERVTYPE(SERVER) +
   STARTCMD('/opt/mq-event-monitor/run.sh') +

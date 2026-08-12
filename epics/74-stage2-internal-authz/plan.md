@@ -39,9 +39,11 @@
 ### Task 1: `authz.yml` — the single source of truth
 
 **Files:**
+
 - Create: `ansible/group_vars/all/authz.yml`
 
 **Interfaces:**
+
 - Produces: the vars `authz_accounts` (list of `{name, group}`), `authz_chlauth_maps` (list of `{channel, sslpeer, mcauser}`), `authz_grants` (list of `{group, object_type, object, authorities}`), `mqsvc_dlq`. Consumed by Tasks 2–4.
 
 - [ ] **Step 1: Write the var file**
@@ -113,11 +115,13 @@ git commit -m "feat(authz): single-source vars for Stage 2 accounts, DN maps, gr
 ### Task 2: `mq-authz-accounts` role — provision the OS principals on every node
 
 **Files:**
+
 - Create: `ansible/roles/mq-authz-accounts/tasks/main.yml`
 - Create: `ansible/roles/mq-authz-accounts/defaults/main.yml`
 - Modify: `ansible/site-pcmk.yml` (add an all-nodes play)
 
 **Interfaces:**
+
 - Consumes: `authz_accounts` (Task 1).
 - Produces: OS groups + users `mqapp`/`mqmon`/`mqsvc` on every host the play targets.
 
@@ -186,11 +190,13 @@ git commit -m "feat(authz): provision mqapp/mqmon/mqsvc on every pcmk node (#74)
 ### Task 3: CHLAUTH-enable + deny-all back-stop + `SSLPEERMAP` maps
 
 **Files:**
+
 - Create: `ansible/roles/mq-pcmk-qmgr/templates/authz.mqsc.j2`
 - Modify: `ansible/roles/mq-pcmk-qmgr/tasks/main.yml` (strip MCAUSER; render+apply the snippet)
 - Modify: `ansible/roles/mq-pcmk-qmgr/templates/inter-qm.mqsc.j2` (PUTAUT on the RCVR)
 
 **Interfaces:**
+
 - Consumes: `authz_chlauth_maps`, `mqsvc_dlq` (Task 1); `qm_name`, `chl_to_app`, `tls_peer_svc` (topology).
 - Produces: `CHLAUTH(ENABLED)` with the deny-all back-stop + three maps live on the QM; the RCVR runs `PUTAUT(DEF)`.
 
@@ -214,7 +220,7 @@ REFRESH SECURITY TYPE(CONNAUTH)
 
 - [ ] **Step 2: Strip the fixed `MCAUSER('mqm')` from the two SVRCONNs**
 
-In `ansible/roles/mq-pcmk-qmgr/tasks/main.yml`, the "apply MQSC config" block (lines ~73–74), remove `MCAUSER('"'"'mqm'"'"') ` from both `DEFINE CHANNEL(APP.SVRCONN…)` and `DEFINE CHANNEL(MON.SVRCONN…)` so the identity comes only from the CHLAUTH map. Leave `ALTER QMGR CHLAUTH(DISABLED) CONNAUTH(' ')` as-is here — Task 3 Step 4 flips CHLAUTH via the snippet *after* the channels exist (blank MCAUSER is only safe once the back-stop is in place).
+In `ansible/roles/mq-pcmk-qmgr/tasks/main.yml`, the "apply MQSC config" block (lines ~73–74), remove `MCAUSER('"'"'mqm'"'"')` from both `DEFINE CHANNEL(APP.SVRCONN…)` and `DEFINE CHANNEL(MON.SVRCONN…)` so the identity comes only from the CHLAUTH map. Leave `ALTER QMGR CHLAUTH(DISABLED) CONNAUTH(' ')` as-is here — Task 3 Step 4 flips CHLAUTH via the snippet *after* the channels exist (blank MCAUSER is only safe once the back-stop is in place).
 
 Result (both lines, MCAUSER removed):
 
@@ -274,9 +280,11 @@ git commit -m "feat(authz): CHLAUTH-enable + deny-all back-stop + SSLPEERMAP map
 ### Task 4: `setmqaut` grants — the minimal authority surface
 
 **Files:**
+
 - Modify: `ansible/roles/mq-pcmk-qmgr/tasks/main.yml`
 
 **Interfaces:**
+
 - Consumes: `authz_grants` (Task 1); `qm_name`. Requires Task 2 (accounts) + Task 3 (channels/maps).
 - Produces: OAM authority records on the QM (on the LUN, so they follow it).
 
@@ -330,10 +338,12 @@ git commit -m "feat(authz): minimal setmqaut grants per service account on pcmk 
 ### Task 5: Induced-denial probe + validation playbook
 
 **Files:**
+
 - Create: `clients/authz_probe.py`
 - Create: `ansible/site-pcmk-authz-validate.yml`
 
 **Interfaces:**
+
 - Consumes: the running, authorized `pcmk-ubuntu` arm (Tasks 1–4 applied). Uses the `mq_prometheus` (ops, `OU=ops`) keystore already placed by `mq-exporter`/`mq-client` for the `mqmon` identity.
 - Produces: pass/fail acceptance for the epic's `validation` task.
 
@@ -482,7 +492,7 @@ Create `ansible/site-pcmk-authz-validate.yml`. It runs on the app host (where th
 ```
 
 > **Grounding note for the implementer:** confirm three things against the live arm before finalizing — (1) the exact `mq_prometheus` and `app-client` keystore stems/paths placed by `mq-exporter`/`mq-client`; (2) that `app_requester.py` supports a one-shot `--once` (add it if not); (3) the app-host sync path for `clients/` (`chdir`). These are known-unknowns, not guesses — verify, don't assume.
-
+>
 > **Scoped this slice: N1 + N3 (+ positives + post-failover).** Spec §10's other
 > negatives are a **validation-hardening follow-up** (Part B), for good reason:
 > **N4** (assert-ownership) can't be induced cleanly client-side — spoofing

@@ -144,7 +144,7 @@ drill-down, saved searches, aggregations). Two decisive reasons:
 The collection layer does not change. Alloy stays the **sole collector** and gains
 **one fan-out sink**:
 
-```
+```text
                                   ┌──────────────► Loki  ──► Grafana   (1st/2nd order: live/recent)
 journald (MQ JSON) ─┐             │                                    UNCHANGED
 mqweb messages.log ─┼─► Alloy ────┤

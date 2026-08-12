@@ -6,7 +6,7 @@ Epic: [logical-minds-foundry/.github#74](https://github.com/logical-minds-foundr
 
 Stage 1 secured and cert-authenticated every connection across the lab's HA arms. **Stage 2 acted on those identities**: it retired `MCAUSER('mqm')`/`CHLAUTH(DISABLED)` on the instrumented app queue managers, mapped each authenticated certificate DN to a non-privileged service account (`mqapp`/`mqmon`/`mqsvc`) via `CHLAUTH SSLPEERMAP`, and locked the queues to a minimal `setmqaut` surface behind a deny-all back-stop — proven on `pcmk-ubuntu` first, then fanned out to `nativeha-ubuntu` and `rdqm-rhel`, each validated live through a real failover. What shipped matches the plan closely; the one substantive addition was a genuine authorization **bug the hardening caught and fixed** (the DLQ `+setall` gap).
 
-**PRs delivered**
+### PRs delivered
 
 | PR | Issue | What it did | Merged |
 |---|---|---|---|

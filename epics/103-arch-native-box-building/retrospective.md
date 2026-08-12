@@ -17,7 +17,7 @@ orchestrator threads a required `--arch` into `build-fatbox.sh`, the box cache i
 uniformly `<box>-<arch>.box`, and the two Ubuntu arms cold-rebuild green booting
 their **baked native** boxes on **both** arm64 (Apple Silicon) and x86 (cloud).
 
-**Work delivered**
+### Work delivered
 
 | Repos touched | 2 — `logical-minds-foundry/.github` (spec/plan/retrospective), `mq-resiliency-lab-for-linux` (all code + docs) |
 |---|---|
@@ -25,7 +25,7 @@ their **baked native** boxes on **both** arm64 (Apple Silicon) and x86 (cloud).
 | PRs merged | 15 across the two repos |
 | Releases cut | none (lab repo; not a released artifact) |
 
-**Core PRs**
+### Core PRs
 
 | PR | Task | What it did |
 |---|---|---|
@@ -39,7 +39,7 @@ their **baked native** boxes on **both** arm64 (Apple Silicon) and x86 (cloud).
 | #728 | T7 #705 | Bake `pcmk-ubuntu` cluster nodes + skip-if-baked; SAN nodes unchanged |
 | #749 | #698 | Docs-review: dev + site docs reflect arch-native box building |
 
-**Fix PRs (all surfaced by driving the real bakes — see §1)**
+### Fix PRs (all surfaced by driving the real bakes — see §1)
 
 | PR | Task | What it fixed |
 |---|---|---|
@@ -50,7 +50,7 @@ their **baked native** boxes on **both** arm64 (Apple Silicon) and x86 (cloud).
 | #738 | #736 | arm64 transient build domain needs UEFI (AAVMF) firmware |
 | #748 | #737 | Standalone `mqlab box build` must render the resolved topology first |
 
-**Operational tasks (no PR — proven by running, recorded as comments)**
+### Operational tasks (no PR — proven by running, recorded as comments)
 
 | Task | Host | Outcome |
 |---|---|---|

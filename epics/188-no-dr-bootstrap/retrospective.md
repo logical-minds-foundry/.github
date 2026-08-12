@@ -4,7 +4,7 @@
 
 We set out to add a lighter-footprint bring-up path — `mqlab bootstrap <stack> --no-dr` — that starts only a stack's HA site (skipping the DR/site-B guests and DR provisioning), because under a full lab load the DR guests starve the host (sustained CPU steal) and IBM MQ Native HA cannot hold quorum. We shipped a **stateless, flag-based mechanism** — a `dr_groups` topology marker + effective-member computation threaded through the bootstrap phases, plus `dr_enabled`-gated provision playbooks — wired for **all four HADR stacks**, documented in the versioned site docs, and **proven on real hardware** by a cold-lab acceptance.
 
-**Work delivered**
+### Work delivered
 
 | PR | Repo | What it did |
 |---|---|---|
@@ -44,11 +44,13 @@ The real deviation was **`pcmk-ubuntu`**. The plan (and the epic's stated approa
 ## §4 New problems & opportunities
 
 Surfaced by the live cold-lab validation (#996) — all filed under **epic #104 (Lab lifecycle reliability)**:
+
 - **#1008** — `commons up` doesn't ensure baked boxes (whereas `bootstrap` does); box-dependent bring-up paths should universally depend on the auto-bake/ensure tooling.
 - **#1009** — `bootstrap`/`commons up` exit 5 on the grafana relay-heal step restarting a non-existent `.socket` unit (the `.service` runs fine), returning non-zero after a fully successful bring-up.
 - **#1010** — the cold-boot staleness nudge conflates the host-mounted (persistent) `build/state` stamp age with VM age, and its "`vrg-vm rebuild` keeps it fresh" remedy is false.
 
 From the PR flow:
+
 - **`vergil-tooling#2750`** — `vrg-pr-await` hangs forever on an orphaned check-run (terminal-but-`BLOCKED` not detected); a recent GitHub-side change made this recurrent.
 
 Opportunity: the pcmk premise-correction argues for a lightweight "does this stack's HA layer touch site-B?" audit as a precondition for any future site-scoped lab feature.

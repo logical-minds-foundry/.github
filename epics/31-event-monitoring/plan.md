@@ -30,10 +30,12 @@
 Turn on every instrumentation-event class on the QMs, declaratively, in the same MQSC surface as the existing `MONQ/STATMQI` exporter gate, so it survives a cold rebuild. Performance events additionally need per-queue thresholds to fire.
 
 **Files:**
+
 - Modify: `ansible/roles/mq-qmgr/tasks/main.yml` (append a new MQSC task after the `enable QM monitoring for the prometheus exporter` task at lines 65–76)
 - Reference (same pattern, do not duplicate the gate into these unless an arm bypasses `mq-qmgr`): `ansible/site-nativeha.yml:66`, `ansible/site-nativeha-ubuntu.yml:57`, `ansible/roles/mq-pcmk-qmgr/tasks/main.yml:80`
 
 **Interfaces:**
+
 - Consumes: `{{ qmgr_name }}` (already in scope in `mq-qmgr`), `/opt/mqm/bin/runmqsc`.
 - Produces: QMs emitting PCF events onto `SYSTEM.ADMIN.*.EVENT`. Task 2's collector depends on these queues being populated.
 
@@ -114,12 +116,14 @@ vrg-commit --type feat --scope obs --message "enable all MQ instrumentation even
 Deploy `amqsevt -o json` as a queue-manager service that travels with the QM across failover, draining events destructively and emitting JSON to journald tagged `mq-events`. The service points at a role-shipped wrapper script (never an inline `sh -c '…|logger'` — that is an MQSC quoting minefield this repo has already lost once, see `mq-pcmk-qmgr`).
 
 **Files:**
+
 - Create: `ansible/roles/mq-event-monitor/tasks/main.yml`
 - Create: `ansible/roles/mq-event-monitor/templates/run.sh.j2`
 - Create: `ansible/roles/mq-event-monitor/defaults/main.yml`
 - Modify: `ansible/roles/mq-qmgr/tasks/main.yml` (include `mq-event-monitor` after the event gate, mirroring how `mq-diag-logging` is included at lines 3–6)
 
 **Interfaces:**
+
 - Consumes: `{{ qmgr_name }}`; the event queues populated by Task 1; the `mq-diag-logging` journald rate-limit drop-in (assert it is present).
 - Produces: journald entries with `SYSLOG_IDENTIFIER=mq-events` carrying one JSON object per event. Task 3 relabels these into Loki.
 
@@ -241,9 +245,11 @@ vrg-commit --type feat --scope obs --message "add mq-event-monitor: amqsevt as a
 Add one relabel rule so the `mq-events` syslog identifier becomes `unit="mq-events"` in Loki, exactly mirroring how `ibm-mq` is already produced. This is the entire "events are a separate stream" mechanism.
 
 **Files:**
+
 - Modify: `ansible/roles/alloy/templates/config.alloy.j2` (the `loki.relabel "journal"` block, lines 5–23)
 
 **Interfaces:**
+
 - Consumes: journald entries with `SYSLOG_IDENTIFIER=mq-events` from Task 2.
 - Produces: Loki stream `{unit="mq-events"}` with the JSON body parseable via `| json`. Task 4 queries this.
 
@@ -255,7 +261,7 @@ Read `config.alloy.j2:16–22`. The second rule already fills `unit` from `__jou
 
 Update the comment at `config.alloy.j2:13–15` to name both identifiers, so a future reader knows `mq-events` is intentional:
 
-```
+```text
   // #282/#31: MQ logs and events via syslog have no systemd unit. Fill `unit` from the
   // syslog identifier ONLY when systemd_unit is empty. MQ core logs → unit="ibm-mq";
   // the MQ.EVENT.MONITOR collector → unit="mq-events" (a separate Loki stream from logs).
@@ -288,11 +294,13 @@ vrg-commit --type feat --scope obs --message "label the MQ event stream as unit=
 Add a dedicated Grafana events feed (`{unit="mq-events"}`), a per-object events filter on the queue/channel views, and — critically — stop the existing cluster log panels from wildcard-matching the new stream. `clusterboard.py` currently leaks: `log_row` (~L605) uses `unit=~"...|.*mq.*"` and the nativeha timeseries (~L735) uses `unit=~"...|mq-.*"`, both of which match `mq-events`.
 
 **Files:**
+
 - Modify: `src/mqlab/clusterboard.py` (`log_row` ~L603–606; nativeha logs `sel` ~L735)
 - Modify: `src/mqlab/messagingboard.py` (add a per-object events panel; its log panel at `mq-app-requester.*`/`mq-svc-responder.*` is positively scoped and does NOT leak — leave that selector as-is)
 - Test: `tests/test_clusterboard.py`, `tests/test_messagingboard.py`
 
 **Interfaces:**
+
 - Consumes: the Loki `{unit="mq-events"}` stream (Task 3) with JSON fields `eventType`, `eventReason`, object name (`queueName`/`channelName`).
 - Produces: rendered dashboard JSON (no downstream consumer).
 
@@ -394,6 +402,7 @@ vrg-commit --type feat --scope obs --message "surface MQ events on the dashboard
 ## Self-Review
 
 **Spec coverage** (spec §10 acceptance criteria → task):
+
 - Events enabled declaratively, survive cold rebuild → Task 1.
 - `amqsevt` as MQ SERVICE, travels with QM, destructive drain, JSON to journald → Task 2.
 - Event JSON reaches Loki, queryable by fields → Task 3.

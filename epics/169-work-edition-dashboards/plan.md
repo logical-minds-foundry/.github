@@ -23,7 +23,7 @@ prior-art citation doc; each non-identical datasource ships a **contract** doc.
 
 ## Global Constraints
 
-*(Every task's requirements implicitly include these — copied from the spec.)*
+(Every task's requirements implicitly include these — copied from the spec.)
 
 - **Portability by contract:** no hardcoded datasource UID, QM name, queue/channel name, or
   undocumented field in any rendered board. Bind to template variables (`$datasource`, `$logs`,

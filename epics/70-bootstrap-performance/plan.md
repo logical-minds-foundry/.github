@@ -25,7 +25,7 @@
 
 ## Task dependency graph
 
-```
+```text
 T1 (bake/configure split) ─┐
 T2 (fat-box builder)      ─┴─▶ T3 (mq-rdqm-rhel9) ─┐
                                T4 (obs-ubuntu2404) ─┼─▶ Deployment ─▶ Validation
@@ -48,12 +48,14 @@ T6b (concurrency tuning) ── blocked-by T3,T4,T5 (after baking)
 Additive foundation: introduce the bake playbooks and prove they run standalone, **without changing bootstrap behavior** (the per-run skips land per-box in Tasks 3–5).
 
 **Files:**
+
 - Create: `ansible/bake-mq-rdqm.yml`, `ansible/bake-obs.yml`, `ansible/bake-infra.yml`
 - Create: `ansible/inventory/bake-host.ini` (minimal single-host inventory for the transient build VM)
 - Create: `docs/development/box-bake-manifest.md` (authoritative per-role bake-vs-configure classification, from spec §4.1)
 - Modify (only where coupling requires): extract `*-install` sub-roles from install roles that carry `run_once`/`delegate_to`/group coupling (candidates: `mq-exporter` if its Go build delegates, `alloy`, `node-exporter`, `mq-install`, `rdqm-install`, `bind-dns`, `grafana`/`prometheus`/`loki`)
 
 **Interfaces:**
+
 - Produces: three bake playbooks (each includes only bake-classified roles/sub-roles) + `bake-host.ini`, consumed by Task 2's builder. The classification doc other tasks cite.
 
 - [ ] **Step 1: Author the classification doc** `docs/development/box-bake-manifest.md` — the per-role table from spec §4.1, naming for each role whether it is bake, configure, or split, and for split roles which tasks/tags go where.
@@ -69,12 +71,14 @@ Additive foundation: introduce the bake playbooks and prove they run standalone,
 ### Task 2: Generalized provision-then-snapshot fat-box builder + `mqlab` wiring
 
 **Files:**
+
 - Create: `lab/boxes/build-fatbox.sh` (parameterized `--box <name> --domain-type <..> --cpu-mode <..> [--rebuild-box] [--dry-run]`)
 - Create: `lab/boxes/_manifest-hash.sh` (compute a box's bake-manifest hash — the package/version pin set + bake playbook path)
 - Modify: `src/mqlab/cli.py` — extend `_LOCAL_BOX_BUILDERS` to map each fat box → `build-fatbox.sh` (with its `--box`); keep `rhel/9.6-x86_64` → `build-box.sh` as the base-OS builder the fat RHEL build depends on
 - Modify: `tests/test_cli_bootstrap.py` (or Create: `tests/test_box_build.py`) — TDD the Python resolution
 
 **Interfaces:**
+
 - Consumes: bake playbooks + `bake-host.ini` (Task 1).
 - Produces: `build-fatbox.sh` that, per box, ensures the base box → boots a transient VM → runs the box's bake playbook against `bake-host.ini` → `qemu-img convert -c` → caches `build/state/boxes/<box>.box` → `vagrant box add <box>`. Decision surface via `--dry-run` (`REUSE`/`BUILD`/`FORCE-BUILD`/`STALE`). `mqlab`'s `_needed_local_boxes` now resolves fat boxes from per-node `box` fields.
 
@@ -108,12 +112,14 @@ def test_needed_local_boxes_resolves_fat_rdqm_box(monkeypatch, tmp_path):
 ### Task 3: `mq-rdqm-rhel9` box (the RDQM node box)
 
 **Files:**
+
 - Create: `lab/boxes/mq-rdqm-rhel9/manifest.yml` (base `rhel/9.6-x86_64`, bake `ansible/bake-mq-rdqm.yml`, MQ 9.4.5.0 + RDQM/DRBD + alloy/node-exporter/exporter/build-tool version pins)
 - Modify: `ansible/bake-mq-rdqm.yml` (finalize the bake set incl. `acl` + the #569 `DiagnosticMessages` default seeded into the box image)
 - Modify: `lab/topology.yaml` — add `mq-rdqm-rhel9` to `boxes:`; repoint `rdqm-a1..3`, `rdqm-b1..3` `platform`/`box` to it (keep the kernel-pin + `extra_disk`, DVD as needed)
 - Modify: `ansible/site-rdqm.yml` + affected roles — **skip the now-baked installs at bootstrap** (the bake roles no longer run per-run); add the base-OS update (`dnf update`) to the configure path (cross-cutting to all boxes)
 
 **Interfaces:**
+
 - Consumes: `build-fatbox.sh` (Task 2), `bake-mq-rdqm.yml` (Task 1).
 - Produces: the RDQM nodes boot from `mq-rdqm-rhel9`; the per-run path contains only configure roles.
 
@@ -130,6 +136,7 @@ def test_needed_local_boxes_resolves_fat_rdqm_box(monkeypatch, tmp_path):
 ### Task 4: `obs-ubuntu2404` box (the observability box)
 
 **Files:**
+
 - Create: `lab/boxes/obs-ubuntu2404/manifest.yml` (base `cloud-image/ubuntu-24.04`, bake `ansible/bake-obs.yml`, Grafana/Prometheus/Loki/alloy/node-exporter pins)
 - Modify: `ansible/bake-obs.yml`; `lab/topology.yaml` (`obs` node `box` → `obs-ubuntu2404`); `ansible/observability.yml`/`host-obs.yml` (skip baked installs; keep dashboards/scrape config per-run)
 
@@ -148,6 +155,7 @@ def test_needed_local_boxes_resolves_fat_rdqm_box(monkeypatch, tmp_path):
 ### Task 5: `infra-ubuntu2404` box (the infrastructure box)
 
 **Files:**
+
 - Create: `lab/boxes/infra-ubuntu2404/manifest.yml` (base `cloud-image/ubuntu-24.04`, bake `ansible/bake-infra.yml`, BIND + node-exporter/alloy pins)
 - Modify: `ansible/bake-infra.yml`; `lab/topology.yaml` (`infra-client`, `infra-svc` `box` → `infra-ubuntu2404`); `ansible/site-dns.yml` (skip baked BIND install; keep **zone data** per-run)
 
@@ -166,6 +174,7 @@ def test_needed_local_boxes_resolves_fat_rdqm_box(monkeypatch, tmp_path):
 ### Task 6a: `acl` anomaly + DRBD volume shrink (no blockers — parallel)
 
 **Files:**
+
 - Investigate/Modify: the `acl`-install path (root-cause the dnf/DVD-repo metadata stall)
 - Modify: `lab/topology.yaml` (`rdqm-*` `extra_disk` 10→ smaller if the PV drives it) + the DRBD/drbdpool volume config (3 GiB → ~1 GiB)
 
@@ -182,6 +191,7 @@ def test_needed_local_boxes_resolves_fat_rdqm_box(monkeypatch, tmp_path):
 ### Task 6b: Concurrency / fork tuning (blocked-by the boxes — sequenced last)
 
 **Files:**
+
 - Modify: `ansible/ansible.cfg` (`forks`) and/or provision/observe overlap — guided by a re-measured sampler run **after** baking has removed most of the disk I/O
 
 **Interfaces:** blocked-by Tasks 3–5 (baking changes the I/O picture first). Measurement-driven; may legitimately be a no-op.

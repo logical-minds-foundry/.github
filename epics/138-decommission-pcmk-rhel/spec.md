@@ -28,6 +28,7 @@ removal is fully covered by the existing topology + parity unit tests).
 ## 2. Decisions
 
 ### D1 — Surgical, pcmk-rhel-exclusive removal (retain everything shared)
+
 Remove **only** assets exclusive to the RHEL Pacemaker arm. The kept `pcmk-ubuntu`
 arm, the kept RDQM-RHEL arm, and the Ubuntu SAN targets share several roles;
 none of those may regress. The verified determination (grep-traced, 2026-07-27):
@@ -54,12 +55,14 @@ file-not-found (reinstate the variant then) rather than silent wrong behaviour.
 The plan records this Debian-only state as the intended outcome.
 
 ### D2 — `san-a-rhel` is removed here, not in the SAN epic
+
 `san-a-rhel` is the RHEL arm's iSCSI SAN target and is meaningful only as part of
 `pcmk-rhel`; it is decommissioned **with** this arm. It is **not** in scope for
 the separate SAN-hosts epic #108, which covers the **Ubuntu**-arm SAN targets
 `san-a`/`san-b`.
 
 ### D3 — Living docs only; historical records are immutable
+
 The docs decommission updates only the **living** docs (`README.md`,
 `docs/development/*`). The historical `docs/specs|plans|reports/*` are
 point-in-time records of what was true when written and are **left untouched**.
@@ -67,6 +70,7 @@ point-in-time records of what was true when written and are **left untouched**.
 ## 3. Scope
 
 ### 3.1 Code decommission — `mq-resiliency-lab-for-linux` (task #794)
+
 - `lab/topology.yaml`: remove the `san-a-rhel` + `pcmk-rhel-a1..3` node entries,
   the `san_a_rhel` / `pcmk_rhel_a` groups, and the `.7x` network allocations
   reserved for this arm (`172.16.1.71..73` heartbeat + the arm's other reserved
@@ -80,6 +84,7 @@ point-in-time records of what was true when written and are **left untouched**.
   pcmk-rhel nodes/groups.
 
 ### 3.2 Docs decommission — `mq-resiliency-lab-for-linux` (task #795, closing)
+
 - Update the living docs to drop the pcmk-rhel arm: `README.md`,
   `docs/development/box-model.md`, `docs/development/box-bake-manifest.md`.
 - Verify `docs/site` carries **no** pcmk-rhel references (confirmed none at design

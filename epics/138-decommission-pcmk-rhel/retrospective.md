@@ -15,7 +15,7 @@ strongly subtractive: **+17 / −267 lines** across four merged PRs, with the la
 tree proving the arm gone by its own topology + parity tests. `pcmk-ubuntu` and
 the RDQM / Native-HA arms are untouched.
 
-**Work delivered**
+### Work delivered
 
 | PR | Task | Repo | What it did |
 |---|---|---|---|

@@ -137,6 +137,7 @@ VirtualBox + Vagrant), now core to how the author works, and rare (only two or
 three known practitioners).
 
 **Approved five-part skeleton** (structure only; content pending the brainstorm):
+
 1. The thesis — what the practice is.
 2. Why — why build the whole thing virtually to learn it.
 3. How — the repeatable method (topology-as-code, glass-box orchestration,
@@ -220,17 +221,17 @@ shape, each ≈ one PR unless noted:
 4a. **Methodology brainstorm (prerequisite)** — the dedicated sub-brainstorm (§4);
    blocks 4b.
 4b. **Methodology / parasite-lab doc** — `Blocked-by` 4a; doc authored after.
-5. **README rewrite** — consumer-first, Vergil aside.
-6. **Guides + Reference currency audit.**
-7. **Make the signed tarball actually work** — the in-scope tooling exception;
+4. **README rewrite** — consumer-first, Vergil aside.
+5. **Guides + Reference currency audit.**
+6. **Make the signed tarball actually work** — the in-scope tooling exception;
    gates the deployment/validation.
-8. **Provision the clean x86 host (setup)** — allocate the Vergil-free Google
+7. **Provision the clean x86 host (setup)** — allocate the Vergil-free Google
    Cloud x86 instance; gates the validation run. May collapse into the
    validation task's **human-attested precondition** rather than a separate issue
    — the plan decides granularity.
-9. **Deployment (operational, human-gated)** — cut the first real signed release;
+8. **Deployment (operational, human-gated)** — cut the first real signed release;
    confirm the tarball is downloadable + verifiable.
-10. **From-scratch consumer validation (operational)** — the clean-x86 run; emits
+9. **From-scratch consumer validation (operational)** — the clean-x86 run; emits
    the report; files gaps.
 
 Ordering: (1), (7), and (8) can start early and run in parallel; (9) is

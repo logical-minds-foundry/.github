@@ -13,7 +13,7 @@ management is healthy; do not hand-roll archiving). All of it shipped, and — t
 part that matters most — it is **proven end-to-end on a cold-rebuilt live arm**,
 not just in unit tests.
 
-**Work delivered**
+### Work delivered
 
 | PR | Issue | What it did |
 |----|-------|-------------|
@@ -32,7 +32,8 @@ not just in unit tests.
 (one-pass provision, LOGGEREV enabled, collector emitting on all three instances,
 timer healthy); #815 live-lab induce-and-assert — **PASS** on re-run after #985.
 
-**By the numbers**
+### By the numbers
+
 - **Repos touched:** 2 — `mq-resiliency-lab-for-linux` (all code + site docs), `logical-minds-foundry/.github` (spec/plan + this retrospective).
 - **Child tasks:** 12 — 2 docs bookends, 1 spike, 5 implementation tasks, 2 validation gates, 1 doc-review bookend, 1 spun-off fix.
 - **PRs merged:** 9 (8 in the lab repo + the spec/plan PR), retrospective pending.
@@ -43,12 +44,12 @@ timer healthy); #815 live-lab induce-and-assert — **PASS** on re-run after #98
 
 The plan carried no formal "Evolution during execution" log; this narrative is
 synthesized from the execution record. The plan's spine — **spike → Tasks 2/3/4 →
-Task 5 → Task 6** — held. What changed was mostly *detail the spike corrected* and
-*one bug the live-lab gate caught*:
+Task 5 → Task 6** — held. What changed was mostly _detail the spike corrected_ and
+_one bug the live-lab gate caught_:
 
 - **The spike de-risked exactly what it was meant to — and paid for itself.** It
-  **confirmed** the load-bearing architecture (LOGGEREV *is* accepted on the
-  replicated QM; logger events *do* ride the existing `amqsevt` → journald
+  **confirmed** the load-bearing architecture (LOGGEREV _is_ accepted on the
+  replicated QM; logger events _do_ ride the existing `amqsevt` → journald
   pipeline) while **correcting three guessed mechanics** that would otherwise have
   become bugs downstream: `DISPLAY QMGR LOGTYPE` does not exist (→ verify against
   `qm.ini` `LogType`), the real log path is `/var/mqm/log/<QM>/active/` (not
@@ -56,7 +57,7 @@ Task 5 → Task 6** — held. What changed was mostly *detail the spike correcte
   three flowed cleanly into Tasks 2–4.
 - **A false alarm became a finding.** The spike's first read was `CURDEPTH(0)` on
   the logger-event queue — seemingly "no events." The cause was the lab's own
-  `mq-event-monitor` *draining the queue in real time* (`IPPROCS(1)`); the events
+  `mq-event-monitor` _draining the queue in real time_ (`IPPROCS(1)`); the events
   were flowing to journald all along. Channel A was fine — the check just had to
   look at the sink, not the depth.
 - **The strict 1→2→3→4→5→6 chain relaxed to a partial order** once the spike
@@ -82,12 +83,12 @@ Task 5 → Task 6** — held. What changed was mostly *detail the spike correcte
 ## §2 Lessons learned
 
 - **A gating spike on a genuinely uncertain assumption is worth it.** Task 1
-  returned three plan corrections and one architecture confirmation *before any
-  role code was written*. Cheap insurance against expensive rework.
+  returned three plan corrections and one architecture confirmation _before any
+  role code was written_. Cheap insurance against expensive rework.
 - **Static green is not "it works."** #812 was lint-clean and 100%-covered yet did
   nothing useful live. Live-lab validation (#815) is not ceremony — it is the only
   gate that catches "the playbook runs successfully and asserts nothing." Keep the
-  live gate mandatory for anything whose whole job is to *observe real behaviour*.
+  live gate mandatory for anything whose whole job is to _observe real behaviour_.
 - **`CURDEPTH(0)` is a false negative when a consumer holds the queue.** Check
   `IPPROCS`/the sink, not depth, before concluding "no events."
 - **The monitor-the-automation thesis held up empirically.** Automatic log
@@ -104,7 +105,7 @@ Task 5 → Task 6** — held. What changed was mostly *detail the spike correcte
   reactive panel. Debt: a real `media_image_age` collector metric is a clean
   follow-on.
 - **Reclaim health is surfaced, not fixed.** The spike observed automatic reclaim
-  *not occurring in-window* (`MEDIALOG` pinned at extent 0; `AMQ7490I` = 55
+  _not occurring in-window_ (`MEDIALOG` pinned at extent 0; `AMQ7490I` = 55
   created / 0 reused / 0 deleted; extent count rising). We characterized this as
   expected pre-first-automatic-image early-life and **made it visible on the
   cockpit** rather than engineering around it — consistent with the epic's
@@ -119,11 +120,11 @@ Task 5 → Task 6** — held. What changed was mostly *detail the spike correcte
 - **#985 — induce accumulate-not-clear + real message sizing.** Spun off from the
   #815 failure; **fixed and closed.**
 - **Media-image-age collector metric.** The board already carries the panel
-  scaffold with a sentinel; a collector metric would make it real. *Logged, not
-  yet acted on.*
+  scaffold with a sentinel; a collector metric would make it real. _Logged, not
+  yet acted on._
 - **Reclaim-health alerting.** The "monotonic extent rise, 0 reuse, pinned
   `MEDIALOG`" pattern is a natural alert threshold — deliberately **out of scope**
-  here (the epic deferred alerting). *Logged.*
+  here (the epic deferred alerting). _Logged._
 
 ## §5 What's next
 

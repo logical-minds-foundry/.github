@@ -17,7 +17,7 @@
     `docs/specs/2026-06-23-kvm-aware-box-build-design.md`) — the pattern of
     *mqlab computes, the build script consumes required args*.
   - the fat-box baking pipeline `lab/boxes/build-fatbox.sh` + per-box `bake-*.yml`
-    + the manifest-hash + skip-if-baked guards (#70/#659, #667/#668, epic #88).
+    - the manifest-hash + skip-if-baked guards (#70/#659, #667/#668, epic #88).
 - **Status:** design (brainstorm output 2026-07-20; pushback-reviewed), pending human review
 - **Date:** 2026-07-20
 
@@ -156,6 +156,7 @@ RHEL being x86 is correct; **Ubuntu being forced to x86 is the bug.**
 ## 4. Scope
 
 **In (this epic):**
+
 - **Part A** — restore arch-native fat-box building (D1–D6): the `platforms`
   authority, the `--arch` plumbing, `build-fatbox.sh` arch-awareness, the uniform
   arch-suffixed cache + migration, `box.py`/`box status`, the topology un-pin, and
@@ -165,6 +166,7 @@ RHEL being x86 is correct; **Ubuntu being forced to x86 is the bug.**
   node repoint to the baked arch-resolved box, and boot tests.
 
 **Out (deferred to bookends):**
+
 - Decommission `pcmk-rhel` (+ `san-a-rhel`) — brainstorm bookend `#107`.
 - SAN-hosts epic covering `san-a` **and** `san-b` — brainstorm bookend `#108`.
 - RHEL native-arm64 building (see §9 non-goals).
@@ -190,7 +192,7 @@ and a RHEL box (if ever built there) would be x86+TCG.
 
 ## 6. Components & data flow (Part A)
 
-```
+```text
 hostfacts.probe() ─► platforms.box_build_arch(box_spec, facts) ─┐
                      platforms.build_domain_virt(facts) ─────────┤
                                                                  ▼

@@ -23,7 +23,7 @@
 
 ## Task dependency graph
 
-```
+```text
 T1 (box.py fleet + `box status`) ──┬─▶ T2 (build/rebuild + bootstrap refactor) ──▶ T4 (DVD verify-and-guide)
                                    ├─▶ T3 (clean)
                                    └─▶ T6 (cold-boot nudge)
@@ -45,11 +45,13 @@ Validation (operational) ── blocked-by T2, T3, T4, T6 (and T5 where the hook
 Introduce the fleet definition and the `box` sub-app with its read-only verb. No mutation, no bootstrap change — pure foundation the other verbs build on.
 
 **Files:**
+
 - Create: `src/mqlab/box.py` — the five-box fleet model + monkeypatchable orchestration seams.
 - Modify: `src/mqlab/cli.py` — `box_app = typer.Typer(...)`, `app.add_typer(box_app, name="box")`, and the `status` handler.
 - Create: `tests/test_cli_box.py`.
 
 **Interfaces:**
+
 - Consumes: `cli._LOCAL_BOX_BUILDERS`, `cli.parse_box_list`, `cli._resolved_nodes`, `cli._vagrant_env`, `cli.repo_root`.
 - Produces:
   - `box.FLEET: dict[str, BoxSpec]` where `BoxSpec` carries `name`, `builder` (script path relative to repo root), `cache_artifact` (e.g. `mq-rdqm-rhel9.box` / `rhel-9.6-x86_64-libvirt.box`), and `has_manifest_hash: bool` (False for the base box).
@@ -105,7 +107,7 @@ def box_status(boxes: list[str] = typer.Argument(None)) -> None:
 
 Add a test asserting `mqlab box status` (via Typer's `CliRunner`) lists all five boxes and a decision column, mirroring `tests/test_cli_build.py`'s runner usage.
 
-- [ ] **Step 8: Validate + commit** — `vrg-container-run -- vrg-validate`; `vrg-commit --type feat --scope mqlab --message "box.py fleet model + read-only \`mqlab box status\` (#<issue>)" --body "Epic logical-minds-foundry/.github#91"`.
+- [ ] **Step 8: Validate + commit** — `vrg-container-run -- vrg-validate`; `vrg-commit --type feat --scope mqlab --message "box.py fleet model + read-only \`mqlab box status\` (#\<issue\>)" --body "Epic logical-minds-foundry/.github#91"`.
 
 **Acceptance:** `mqlab box status` renders the five-box fleet with cache/age/hash(N-A for base)/registration + decision, read-only; fleet + parsing unit-tested at 100% branch.
 
@@ -116,11 +118,13 @@ Add a test asserting `mqlab box status` (via Typer's `CliRunner`) lists all five
 Add the mutating ensure/force-bake verbs and refactor `_ensure_local_boxes` to call the same core, so bootstrap and the CLI share one path.
 
 **Files:**
+
 - Modify: `src/mqlab/box.py` — the build/rebuild core.
 - Modify: `src/mqlab/cli.py` — `box build` / `box rebuild` handlers; refactor `_ensure_local_boxes` to delegate.
 - Modify: `tests/test_cli_box.py`, `tests/test_cli_bootstrap.py`.
 
 **Interfaces:**
+
 - Consumes: Task 1's `box.FLEET`; `cli._box_build_steps`, `cli.run_steps`, `cli.build_deps`.
 - Produces:
   - `box.build_boxes(names: list[str], *, force: bool) -> None` — for each name, build a `CommandStep` (reusing `_box_build_steps`, adding `--rebuild-box` when `force`) and run it via `run_steps`; raises `typer.Exit(code)` on `StepFailedError`.
@@ -178,11 +182,13 @@ def test_ensure_local_boxes_delegates_to_build_core(monkeypatch):
 ### Task 3: `box clean` — pristine cache removal + deregister
 
 **Files:**
+
 - Modify: `src/mqlab/box.py` — the clean core.
 - Modify: `src/mqlab/cli.py` — the `clean` handler.
 - Modify: `tests/test_cli_box.py`.
 
 **Interfaces:**
+
 - Consumes: Task 1's `box.FLEET`; `cli.state`, `cli._vagrant_env`.
 - Produces: `box.clean_boxes(names: list[str]) -> list[str]` — for each box, remove `build/state/boxes/<artifact>` and its `<name>.manifest-hash` (when present) and `vagrant box remove <name>` (ignore "not installed"); returns the list of removed paths/registrations for the caller to echo.
 
@@ -230,11 +236,13 @@ def box_clean(boxes: list[str] = typer.Argument(None), all_: bool = typer.Option
 Guard the RHEL base-box BUILD path (the sole DVD consumer) with a presence + checksum preflight and fail-loud guidance.
 
 **Files:**
+
 - Modify: `src/mqlab/box.py` — a `verify_rhel_dvd()` preflight + the pinned-SHA config, invoked from the build core before the RHEL base BUILD path.
 - Create: `tests/test_box_dvd.py`.
 - Modify: `docs/development/box-model.md` — note the mqlab-side verify-and-guide (its own §6 doc sweep is the closing #666 gate; this is the code-adjacent note).
 
 **Interfaces:**
+
 - Consumes: Task 2's build core; the canonical ISO path `state("rhel-9.6-x86_64-dvd.iso")` (mirroring `stage-rhel-iso.sh`'s default).
 - Produces:
   - `box.RHEL_DVD_SHA256: dict[str, str]` — RHEL version → pinned checksum (operator-supplied from Red Hat's published checksum; **not fabricated**).
@@ -282,11 +290,13 @@ def test_verify_dvd_pass(monkeypatch, tmp_path):
 Deliver the credential-free convenience: a one-time-configured local DVD archive that a VM build auto-stages. The script + declaration land here; the hook *fires* once the cross-org `vrg-vm` capability exists (referenced by comment in #91).
 
 **Files:**
+
 - Create: `lab/scripts/stage-rhel-dvd-from-archive.sh` — idempotent rsync from a configured source dir → `build/state/`.
 - Modify: `vergil.toml` — declare the VM-specific post-build hook that runs the script (inert until `vrg-vm` supports it).
 - Modify: `docs/development/box-model.md` — document the one-time-download + static-archive + auto-stage flow.
 
 **Interfaces:**
+
 - Consumes: an operator-configured source directory (env `MQLAB_RHEL_DVD_ARCHIVE`, else a documented default under the operator's home archive); the build/ state bucket path.
 - Produces: an idempotent staging script + the `vergil.toml` hook declaration. No Python surface (host-side shell + config).
 
@@ -309,12 +319,14 @@ Deliver the credential-free convenience: a one-time-configured local DVD archive
 ### Task 6: Cold-boot staleness nudge — stamp + surfaces
 
 **Files:**
+
 - Modify: `src/mqlab/buildenv.py` — write `state/.cold-boot-stamp` once when `state/` is first initialized.
 - Create: `src/mqlab/coldboot.py` — the age read + banded NOTICE render (tunable constants).
 - Modify: `src/mqlab/cli.py` — surface the nudge in the `box status` header, `doctor`, and the `bootstrap` preflight.
 - Modify: `tests/test_cli_box.py`, `tests/test_cli_doctor.py`, and add `tests/test_coldboot.py`.
 
 **Interfaces:**
+
 - Consumes: `cli.state`, `buildenv.ensure`.
 - Produces:
   - `buildenv.ensure(...)` writes `state/.cold-boot-stamp` with the current UTC time **iff** it does not already exist (write-once; a fresh `/vergil` has no stamp → new stamp).
