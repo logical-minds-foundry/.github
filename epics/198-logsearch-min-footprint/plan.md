@@ -24,7 +24,7 @@ a baked Vagrant "fatbox" (`logsearch-ubuntu2404`), OpenSearch 3.8.0, `mqlab` boo
 
 ## Global Constraints
 
-*(Every task's requirements implicitly include these.)*
+(Every task's requirements implicitly include these.)
 
 - **Plaintext is already the posture (#827):** `opensearch.yml` sets
   `plugins.security.disabled: true`; Data Prepper's sink writes `insecure: true` plain http;
