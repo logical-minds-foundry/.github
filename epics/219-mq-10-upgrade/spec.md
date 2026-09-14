@@ -76,7 +76,7 @@ fix this **leanly** so the upgrade *is* changing one authoritative pin.
 
 ## 3. Scope
 
-**In scope**
+### In scope
 
 - A single authoritative MQ version pin, threaded to all consumers (§4).
 - A generic Native HA **CRR** rolling-upgrade runbook, 9.4.5 → 10.0 (§5) — the
@@ -86,7 +86,7 @@ fix this **leanly** so the upgrade *is* changing one authoritative pin.
   Live + site-B Recovery, DR enabled), including the post-upgrade DR
   failover/failback validation, with an evidence report (§6).
 
-**Out of scope**
+### Out of scope
 
 - Upgrade/downgrade automation.
 - OS upgrade (MQ 10.0 runs on the lab's RHEL 9.6).

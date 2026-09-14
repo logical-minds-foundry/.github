@@ -46,20 +46,24 @@ All file paths below are relative to the lab repo `logical-minds-foundry/mq-resi
 **Type:** research spike. Output is a short findings note committed under `docs/reports/`, plus IBM pages cached under `build/refs/`. De-risks the unknowns in spec §8 before the runbook (Task 3) and the pin bump (Task 5) are written. No production code.
 
 **Files:**
+
 - Create: `docs/reports/YYYY-MM-DD-mq-10-upgrade-spike.md`
 - Cache (gitignored): `build/refs/ibm-docs/ibm-mq/10.0.x/…` via `tools/ibm_doc_cache.py`
 
 **Interfaces:**
+
 - Produces: the confirmed facts consumed by Task 3 (runbook) and Task 5 (10.0 version string / tarball). Specifically: the exact 10.0 LTS 4-part version string; the developer-tarball filename(s) and base URL for `fetch-mq.sh`; the within-group and cross-site ordering rules with the exact `dspmq` status gates; and the **point of no return** for a major-version Native HA/CRR migration (is any in-place downgrade supported, or is back-out restore-from-backup?).
 
 - [ ] **Step 1: Cache the authoritative IBM pages**
 
 Run:
+
 ```bash
 python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/en/ibm-mq/10.0.x?topic=irr-upgrading-native-ha-configurations"
 python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/en/ibm-mq/10.0.x?topic=migrating-native-ha-queue-manager"
 python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/en/ibm-mq/10.0.x?topic=migration-queue-manager-methods"
 ```
+
 (The IRR topic is confirmed to exist; discover and cache the sibling Native-HA migration and queue-manager-migration-methods topics for 10.0 from its navigation. Cite `content.txt` with the `source_url` from `meta.json`.)
 
 - [ ] **Step 2: Confirm the 10.0 developer media**
@@ -69,9 +73,11 @@ Determine the exact 10.0 developer tarball name(s) matching `fetch-mq.sh`'s patt
 - [ ] **Step 3: Confirm the 9.4.5 media is staged (test precondition)**
 
 Run:
+
 ```bash
 ls -la "$(mqlab build path cache)/mq/" 2>/dev/null || ls -la build/cache/mq/
 ```
+
 Record whether `9.4.5.0-IBM-MQ-Advanced-for-Developers-LinuxX64.tar.gz` is present (the RHEL CRR test needs it). If absent, note whether `scripts/fetch-mq.sh` can still fetch it from IBM; if it cannot, raise to the human — this is the spec §8 media-availability precondition.
 
 - [ ] **Step 4: Write the findings note**
@@ -89,25 +95,29 @@ vrg-commit --type docs --scope upgrade --message "spike — IBM MQ 10.0 Native H
 ### Task 1: The MQ version pin + Python/shell consumers
 
 **Files:**
+
 - Create: `lab/mq-version`
 - Modify: `src/mqlab/manifest.py:68-70`
 - Modify: `scripts/fetch-mq.sh:7`
 - Test: `tests/test_mq_version_pin.py`
 
 **Interfaces:**
+
 - Produces: `lab/mq-version` (bare 4-part version string, single line, trailing newline). `manifest.DEFAULT_MQ_VERSION: str` — unchanged name and type, now sourced from the pin. `manifest.mq_version_pin_path() -> Path` — helper returning `repo_root() / "lab" / "mq-version"`, consumed by the test.
 - Consumes: `repo_root()` from `mqlab.paths` (already imported in `manifest.py`).
 
 - [ ] **Step 1: Create the pin file**
 
 `lab/mq-version` — exactly one line:
-```
+
+```text
 9.4.5.0
 ```
 
 - [ ] **Step 2: Write the failing test**
 
 `tests/test_mq_version_pin.py`:
+
 ```python
 """The single-source MQ version invariant (epic .github#219)."""
 
@@ -145,6 +155,7 @@ Expected: FAIL — `test_manifest_default_matches_pin` (still a literal that hap
 - [ ] **Step 4: Re-thread `manifest.py`**
 
 Replace the literal at `src/mqlab/manifest.py:68-70`:
+
 ```python
 def mq_version_pin_path() -> Path:
     """The single authoritative MQ version pin (epic .github#219)."""
@@ -155,14 +166,17 @@ def mq_version_pin_path() -> Path:
 # shares (lab/mq-version); no more hand-synced literals. cli.py imports this name.
 DEFAULT_MQ_VERSION = mq_version_pin_path().read_text().strip()
 ```
+
 Add `from pathlib import Path` to the runtime imports (it is currently only under `TYPE_CHECKING`). Keep `repo_root` (already imported).
 
 - [ ] **Step 5: Re-thread `fetch-mq.sh`**
 
 Replace `scripts/fetch-mq.sh:7`:
+
 ```bash
 VER="$(cat "$(cd "$(dirname "$0")/.." && pwd)/lab/mq-version")"
 ```
+
 (The script already computes the repo root the same way for `DEST`.)
 
 - [ ] **Step 6: Run the tests to verify they pass**
@@ -186,18 +200,21 @@ vrg-commit --type refactor --scope versioning --message "single MQ version pin (
 ### Task 2: Ansible consumers — group_vars source + version-aware NHA floor
 
 **Files:**
+
 - Modify: `ansible/group_vars/all/versions.yml:5`
 - Modify: `ansible/roles/mq-nativeha/tasks/main.yml` (the "assert MQ >= 9.4.4" task)
 - Delete: `manifests/distributed-rdqm-rhel/default.yaml`, `manifests/distributed-pcmk-ubuntu/default.yaml`
 - Test: extend `tests/test_mq_version_pin.py`
 
 **Interfaces:**
+
 - Consumes: `lab/mq-version` (Task 1).
 - Produces: `mq_version` Ansible fact sourced from the pin; an NHA floor assertion that accepts any MQ `>= 9.4.4` (so 10.0 passes).
 
 - [ ] **Step 1: Write the failing tests**
 
 Append to `tests/test_mq_version_pin.py`:
+
 ```python
 def test_group_vars_sources_pin() -> None:
     y = (repo_root() / "ansible" / "group_vars" / "all" / "versions.yml").read_text()
@@ -225,14 +242,17 @@ Expected: FAIL (all three).
 - [ ] **Step 3: Source `mq_version` from the pin**
 
 `ansible/group_vars/all/versions.yml:5` becomes:
+
 ```yaml
 mq_version: "{{ lookup('file', playbook_dir + '/../lab/mq-version') | trim }}"
 ```
+
 (Playbooks run from `ansible/`, so `playbook_dir/../lab/mq-version` resolves to the repo pin. Leave the `grafana_version` line untouched — obs drift is out of scope.)
 
 - [ ] **Step 4: Make the NHA floor version-aware**
 
 Replace the assert task in `ansible/roles/mq-nativeha/tasks/main.yml`:
+
 ```yaml
 - name: assert MQ >= 9.4.4 CD (Native HA off-container floor)
   ansible.builtin.assert:
@@ -241,18 +261,23 @@ Replace the assert task in `ansible/roles/mq-nativeha/tasks/main.yml`:
     fail_msg: "MQ level {{ mqver.stdout }} is below the 9.4.4 Native HA floor"
     success_msg: "MQ level OK for Native HA: {{ mqver.stdout }}"
 ```
+
 (`dspmqver -b -f 2` returns the bare 4-part version, so Ansible's `version` test compares correctly: `10.0.0.0 >= 9.4.4` is true.)
 
 - [ ] **Step 5: Confirm the stale manifests are unreferenced, then delete**
 
 Run:
+
 ```bash
 grep -rn "distributed-rdqm-rhel\|distributed-pcmk-ubuntu" src/ ansible/ lab/ scripts/ tools/ | grep -v _shared
 ```
+
 Expected: no code loads `manifests/distributed-*/default.yaml` (the live overlay is `manifests/_shared/observability.yaml`). If the grep is clean, delete both files:
+
 ```bash
 vrg-git rm manifests/distributed-rdqm-rhel/default.yaml manifests/distributed-pcmk-ubuntu/default.yaml
 ```
+
 If the grep finds a real consumer, STOP and raise it — do not delete.
 
 - [ ] **Step 6: Run tests + validate**
@@ -273,14 +298,17 @@ vrg-commit --type refactor --scope versioning --message "Ansible reads the MQ pi
 **Type:** documentation. No unit tests; validated by `vrg-validate` (markdown/style) and human review. Grounded entirely in Task 0's cached IBM facts.
 
 **Files:**
+
 - Create: `docs/reference/nativeha-mq-upgrade-runbook.md`
 
 **Interfaces:**
+
 - Consumes: Task 0's findings note (ordering rules, `dspmq` gates, point of no return, back-out mechanism).
 
 - [ ] **Step 1: Draft the runbook to the spec §5 structure**
 
 Sections, in order, each with concrete MQSC/CLI commands (not prose gestures):
+
 1. **Scope & headline rules** — Recovery-site-first; replicas-first/active-last; maintenance window; roles return to start.
 2. **Pre-flight & back-out** — pre-checks (versions in both groups, `dspmq -o nativeha` health, disk, media staged, entitlement, recorded starting roles); the **point of no return** and the **true back-out mechanism** from Task 0.
 3. **Quiesce & assert** — stop listener(s); drain; assert via `DISPLAY CONN`, `DISPLAY CHSTATUS`, transmit-queue depths zero.
@@ -315,6 +343,7 @@ vrg-commit --type docs --scope upgrade --message "Native HA CRR MQ 9.4.5→10.0 
 **Type:** `--kind validation`. Filed as an operational task; run with `issue-validate`, **not** `issue-implement`. Closes only on `Outcome: SUCCESS` recorded as a comment. **Blocked-by** Tasks 1, 2, 3 merged (the centralized pin + runbook must be on `develop`); informed by Task 0.
 
 **Precondition self-check (run first; if unmet, comment "blocked: preconditions not met" and stop):**
+
 - Tasks 1–3 merged to `develop`.
 - `build/cache/mq/9.4.5.0-IBM-MQ-Advanced-for-Developers-LinuxX64.tar.gz` present (spec §8 media precondition; Task 0 Step 3), **and** the 10.0 developer tarball fetchable/staged per Task 0 Step 2.
 
@@ -345,11 +374,13 @@ Comment `Outcome: SUCCESS` (or `FAILURE` with detail) on the validation issue pe
 ### Task 5: Rebaseline the lab default to MQ 10.0
 
 **Files:**
+
 - Modify: `lab/mq-version`
 - Modify: `scripts/fetch-mq.sh` comment header (if it names 9.4.5)
 - Test: `tests/test_mq_version_pin.py` (unchanged — the regex invariant already covers any 4-part version)
 
 **Interfaces:**
+
 - Consumes: Task 0's confirmed 10.0 version string; Task 4 SUCCESS (only rebaseline after the upgrade is proven). **Blocked-by** Task 4.
 
 - [ ] **Step 1: Flip the pin**
@@ -393,6 +424,7 @@ Comment `Outcome: SUCCESS` (or `FAILURE` with detail). On SUCCESS the task close
 ## Self-Review
 
 **Spec coverage:**
+
 - §4 version centralization → Tasks 1–2 (pin, consumers, floor, stale-manifest removal); acceptance (§4.4) rides Task 4 Step 1 and the closing Task 6.
 - §5 runbook (all sub-sections, ordering rules, quiesce/assert, back-out, DR validation) → Task 3, grounded by Task 0.
 - §6 test & evidence (full RHEL CRR, DR enabled, both-group upgrade, failover/failback, report) → Task 4; rebaseline + from-zero 10.0 build → Tasks 5–6.
