@@ -23,6 +23,7 @@
 - **Validation command is the only one:** `vrg-container-run -- vrg-validate`. Unit tests run under it; locally, `uv run pytest`. `uv` is a build/dev tool, never runtime.
 - **Commits:** `vrg-commit --type <type> --scope <scope> --message <msg>`; every commit message ends with `Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>`.
 - **Cold rebuild is the acceptance gate** for provisioning changes; lint-green ≠ done.
+- **Execution environment — cloud x86.** The RHEL Native HA CRR (DR-enabled) bring-up, upgrade, and both validation gates (Tasks 4 and 6) run on the **cloud x86 host, not local macOS**: full RHEL-OS HADR does not perform under Apple-Silicon whole-guest-OS emulation, only the Ubuntu arm is workable locally, and no ARM MQ binaries exist on any platform (mirrors the #88 RHEL NHA cloud-x86 approach). The code tasks (0, 1, 2, 3, 5) are platform-agnostic and can be worked anywhere.
 
 ## File Structure
 

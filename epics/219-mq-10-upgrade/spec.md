@@ -219,6 +219,13 @@ Re-enable the listener; application flow resumes. Maintenance window closes.
 - **Target:** the **full RHEL Native HA CRR topology** — site-A Live
   (`nha-rhel-a1/a2/a3`) + site-B Recovery (`nha-rhel-b1/b2/b3`), **DR enabled**
   (no `--no-dr`) — brought up on a **cold-rebuilt** lab at **9.4.5**.
+- **Execution environment: the cloud x86 host, not local macOS.** The RHEL CRR
+  arm emulates the whole guest OS, which does not perform acceptably under
+  Apple-Silicon virtualization (locally, only the Ubuntu arm is workable —
+  MQ over a native-arch guest — and no ARM MQ binaries exist on any platform).
+  So this workstream, and both validation gates (§6, and the from-zero 10.0
+  rebuild), run in the cloud on base x86 — the same way the RHEL Native HA arm
+  is already exercised (#88).
 - **Execution:** drive the §5 runbook **manually (AI-executed)** — quiesce and
   assert, upgrade the Recovery group to 10.0, upgrade the Live group to 10.0,
   sanity-gate, then the failover/failback DR validation, then go-live.
