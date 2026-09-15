@@ -33,13 +33,16 @@
 ## File Structure
 
 **Ansible (shared role — one conditional line):**
+
 - Modify: `ansible/roles/mq-nativeha/tasks/crr.yml` — add `replication_mode`-gated `SyncConsistency=Strict` to the `NativeHARecoveryGroup` block.
 - Modify: `ansible/roles/mq-nativeha/tasks/main.yml` — version-floor gate (only if Task 1 requires).
 
 **Ansible (composing playbooks — parameterize, don't fork):**
+
 - Modify: `ansible/site-nativeha.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/site-nativeha-switchover.yml` — de-hardcode live/recovery group names and `peer_wan_addrs`; drive them from stack-scoped extra-vars.
 
 **Topology + CLI wiring:**
+
 - Modify: `lab/topology.yaml` — full CRR rename (stack/short/QM + `nha_rhel_crr_a/b` groups + `nha-rhel-crr-*` nodes); add 6 IRR nodes, `nha_rhel_irr_a/b` groups, the `nativeha-rhel-irr` stack entry.
 - Modify: `src/mqlab/cli.py` — new `netem` and `bench` Typer sub-apps; pass the stack's live/recovery groups + `replication_mode` as extra-vars to the provision playbook.
 - Modify: `src/mqlab/parity.py` — capability-matrix rows for the two stacks.
@@ -47,6 +50,7 @@
 - Modify: `ansible/observability.yml` — group-membership conditionals + QM fallback for the new groups.
 
 **New host script + client + tests:**
+
 - Create: `lab/scripts/net-latency.sh` — the `tc netem` recipe on `virbr-wan` (set/clear/show).
 - Create: `clients/bench_client.py` — purpose-built benchmark client.
 - Create: `lab/scripts/bench-sweep.sh` — orchestrates a `{mode}×{latency}` sweep, emits the results artifact.
@@ -59,6 +63,7 @@
 **Kind:** investigation → a facts report committed as a doc. No production code. Blocks Tasks 3, 4, 5.
 
 **Files:**
+
 - Create: `docs/reports/<YYYY-MM-DD>-mq10-nativeha-irr-setup-facts-spike.md`
 - Cache (gitignored): `build/refs/ibm-docs/ibm-mq/10.0.x/<slug>/` via `tools/ibm_doc_cache.py`
 
@@ -98,6 +103,7 @@ cd <worktree> && vrg-git add docs/reports/<file>.md && \
 **Rationale:** give the existing arm an explicit CRR identity paired with the IRR stack — a **full rename**: stack key, `short`, QM, **and** node/group names. Renaming the nodes/groups serves the **arm-coexistence constraint** (each arm's nodes are uniquely named so CRR and IRR can run together — which this epic exercises); it is not gratuitous churn. The rename is **atomic** — every reference moves in this one task, including the composing playbooks' still-hardcoded group literals, so the CRR stack works after Task 2; Task 4 later replaces those literals with parameterized extra-vars. `async` behaviour is byte-for-byte unchanged.
 
 **Files:**
+
 - Modify: `lab/topology.yaml` — stack key `nativeha-rhel`→`nativeha-rhel-crr`, `short` NHAR→NHARC, `alloc.app_unit` app-nhar→app-nhar-crr, `cluster_group`/`groups`/`dr_groups` and the group definitions `nha_rhel_a/b`→`nha_rhel_crr_a/b`, and the 6 node entries `nha-rhel-{a,b}{1,2,3}`→`nha-rhel-crr-*` (keep their existing IPs)
 - Modify: `ansible/site-nativeha.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/site-nativeha-switchover.yml` — group literals `nha_rhel_a/b`→`nha_rhel_crr_a/b` (in `hosts:`/`delegate_to`/preflight), node names in the inline `nha_site_nodes`, and `qm_app | default('NHARAPP')`→`default('NHARCAPP')`
 - Modify: `src/mqlab/parity.py:43` (`"nativeha-rhel"`→`"nativeha-rhel-crr"`)
@@ -158,6 +164,7 @@ vrg-commit --type refactor --scope nativeha --message "rename the CRR Native HA 
 ## Task 3: `replication_mode` in the shared role (the one-line CRR↔IRR difference)
 
 **Files:**
+
 - Modify: `ansible/roles/mq-nativeha/tasks/crr.yml:29-41`
 - Modify: `ansible/roles/mq-nativeha/tasks/main.yml:18-28` (version floor — only if Task 1 requires)
 
@@ -209,6 +216,7 @@ vrg-commit --type feat --scope nativeha --message "parameterize Native HA replic
 **Rationale:** today `site-nativeha.yml` / `_nativeha-cluster-ha.yml` / `_nativeha-dr-replication.yml` / `site-nativeha-switchover.yml` hardcode `nha_rhel_a` / `nha_rhel_b` in `hosts:`/`delegate_to`/preflight, inline `nha_site_nodes` with literal IPs, and hardcode `peer_wan_addrs`. To serve both stacks from one codebase (spec §3.3, binding decision #4), drive these from stack-scoped extra-vars supplied by `mqlab`.
 
 **Files:**
+
 - Modify: `ansible/site-nativeha.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/site-nativeha-switchover.yml`
 - Modify: `src/mqlab/cli.py` (pass the extra-vars) + wherever the provision step is built (`src/mqlab/phases.py`)
 - Test: `tests/test_cli_bootstrap.py` (assert the extra-vars are passed)
@@ -217,6 +225,7 @@ vrg-commit --type feat --scope nativeha --message "parameterize Native HA replic
   - `nha_live_group` (e.g. `nha_rhel_a`), `nha_recovery_group` (e.g. `nha_rhel_b`)
   - `nha_recovery_wan_addrs`, `nha_live_wan_addrs` (lists, from topology `net-wan` NICs of the recovery/live nodes)
   - `replication_mode` (`async` | `strict`)
+
   Build these in `mqlab` from the stack definition (`stack.groups`, node NICs) and pass via `-e`.
 
 - [ ] **Step 2: Write the failing test.** In `tests/test_cli_bootstrap.py`, assert the provision command carries the group + mode extra-vars for the CRR stack:
@@ -262,6 +271,7 @@ vrg-commit --type refactor --scope nativeha --message "drive Native HA composing
 **Prerequisite:** Tasks 1, 3, 4 landed. Live bring-up needs the resized VM (prerequisite gate).
 
 **Files:**
+
 - Modify: `lab/topology.yaml` — 6 new nodes (`nha-rhel-irr-a1..3`, `-b1..3`) on a fresh octet block (`.7x` free), `nha_rhel_irr_a/b` groups, the `nativeha-rhel-irr` stack entry (`replication_mode: strict`, `short: NHARI`, `provision: ansible/site-nativeha.yml`, `alloc.exporter_app_port: 9165`, `app_unit: app-nhar-irr`, reuse box `mq-nativeha-rhel9`).
 - Modify: `src/mqlab/parity.py`, `src/mqlab/clusterboard.py`, `ansible/observability.yml` (per Task-2 pattern, add the IRR groups/QM).
 - Test: `tests/test_stacks.py`
@@ -302,6 +312,7 @@ vrg-container-run -- pytest tests/test_stacks.py::test_irr_stack -v
   nha_rhel_irr_a: [nha-rhel-irr-a1, nha-rhel-irr-a2, nha-rhel-irr-a3]
   nha_rhel_irr_b: [nha-rhel-irr-b1, nha-rhel-irr-b2, nha-rhel-irr-b3]
 ```
+
 ```yaml
   nativeha-rhel-irr:
     mechanism: native-ha
@@ -336,6 +347,7 @@ mqlab bootstrap nativeha-rhel-crr
 mqlab bootstrap nativeha-rhel-irr
 mqlab qm status nativeha-rhel-irr    # dspmq -o nativeha shows healthy IRR state
 ```
+
   Confirm a persistent PUT to `NHARIAPP` is present on the Recovery group before commit returns (the strict-sync sanity check — one observation, not the swept RPO proof). Record the transcript on the epic.
 
 **Acceptance:** both stacks resolve and bring up; `NHARIAPP` forms a strict-sync Live+Recovery pair; an app reaches `NHARCAPP` and `NHARIAPP` by name; validation green.
@@ -345,6 +357,7 @@ mqlab qm status nativeha-rhel-irr    # dspmq -o nativeha shows healthy IRR state
 ## Task 6: `mqlab netem` delay knob
 
 **Files:**
+
 - Create: `lab/scripts/net-latency.sh` (the `tc` recipe; owns the attach-point decision)
 - Modify: `src/mqlab/cli.py` (new `netem` Typer sub-app)
 - Test: `tests/test_cli_netem.py`
@@ -427,6 +440,7 @@ vrg-commit --type feat --scope netem --message "add mqlab netem: tunable WAN lat
 ## Task 7: Purpose-built benchmark client
 
 **Files:**
+
 - Create: `clients/bench_client.py` (not under `--cov=src`; still unit-test its pure logic)
 - Modify: `ansible/roles/app-requester/` or a new `bench` deploy path (deploy the client to `app-client`)
 - Test: `tests/test_bench_client.py` (pure-logic tests)
@@ -466,6 +480,7 @@ vrg-commit --type feat --scope bench --message "purpose-built Native HA benchmar
 **Prerequisite:** Tasks 5–7 landed; resized VM; both stacks up.
 
 **Files:**
+
 - Create: `lab/scripts/bench-sweep.sh` (orchestrates the matrix; heavy logic here, not `--cov=src`)
 - Modify: `src/mqlab/cli.py` (thin `bench` Typer verb shelling the sweep script)
 - Create: `docs/reports/<YYYY-MM-DD>-crr-vs-irr-latency-comparison.md` (the report) + the JSONL results artifact alongside it in `docs/reports/`
