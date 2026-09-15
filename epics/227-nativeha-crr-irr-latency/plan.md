@@ -40,7 +40,7 @@
 - Modify: `ansible/site-nativeha.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/site-nativeha-switchover.yml` — de-hardcode live/recovery group names and `peer_wan_addrs`; drive them from stack-scoped extra-vars.
 
 **Topology + CLI wiring:**
-- Modify: `lab/topology.yaml` — rename the CRR stack; add 6 IRR nodes, `nha_rhel_irr_a/b` groups, the `nativeha-rhel-irr` stack entry.
+- Modify: `lab/topology.yaml` — full CRR rename (stack/short/QM + `nha_rhel_crr_a/b` groups + `nha-rhel-crr-*` nodes); add 6 IRR nodes, `nha_rhel_irr_a/b` groups, the `nativeha-rhel-irr` stack entry.
 - Modify: `src/mqlab/cli.py` — new `netem` and `bench` Typer sub-apps; pass the stack's live/recovery groups + `replication_mode` as extra-vars to the provision playbook.
 - Modify: `src/mqlab/parity.py` — capability-matrix rows for the two stacks.
 - Modify: `src/mqlab/clusterboard.py` — Grafana board selectors for the two stacks.
@@ -95,14 +95,14 @@ cd <worktree> && vrg-git add docs/reports/<file>.md && \
 
 ## Task 2: Rename the CRR stack identity (`nativeha-rhel` → `nativeha-rhel-crr`, `NHAR` → `NHARC`)
 
-**Rationale:** give the existing arm an explicit CRR identity, paired with the new IRR stack. Keep the physical node/group names (`nha-rhel-a1..3`, `nha_rhel_a/b`) unchanged — they are internal labels; renaming them is gratuitous churn. Only the stack key, `short`, and derived QM name change. `async` behaviour is byte-for-byte unchanged.
+**Rationale:** give the existing arm an explicit CRR identity paired with the IRR stack — a **full rename**: stack key, `short`, QM, **and** node/group names. Renaming the nodes/groups serves the **arm-coexistence constraint** (each arm's nodes are uniquely named so CRR and IRR can run together — which this epic exercises); it is not gratuitous churn. The rename is **atomic** — every reference moves in this one task, including the composing playbooks' still-hardcoded group literals, so the CRR stack works after Task 2; Task 4 later replaces those literals with parameterized extra-vars. `async` behaviour is byte-for-byte unchanged.
 
 **Files:**
-- Modify: `lab/topology.yaml:446-464` (stack key + `short`), `:456` (`alloc.app_unit`)
-- Modify: `src/mqlab/parity.py:43`
-- Modify: `src/mqlab/clusterboard.py` (the `"nativeha-rhel"` board map + `NHARAPP` selectors)
-- Modify: `ansible/observability.yml:40-44` (the `NHARAPP` QM fallback)
-- Modify: `ansible/site-nativeha-switchover.yml` (the `qm_app | default('NHARAPP')` default → `NHARCAPP`)
+- Modify: `lab/topology.yaml` — stack key `nativeha-rhel`→`nativeha-rhel-crr`, `short` NHAR→NHARC, `alloc.app_unit` app-nhar→app-nhar-crr, `cluster_group`/`groups`/`dr_groups` and the group definitions `nha_rhel_a/b`→`nha_rhel_crr_a/b`, and the 6 node entries `nha-rhel-{a,b}{1,2,3}`→`nha-rhel-crr-*` (keep their existing IPs)
+- Modify: `ansible/site-nativeha.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/site-nativeha-switchover.yml` — group literals `nha_rhel_a/b`→`nha_rhel_crr_a/b` (in `hosts:`/`delegate_to`/preflight), node names in the inline `nha_site_nodes`, and `qm_app | default('NHARAPP')`→`default('NHARCAPP')`
+- Modify: `src/mqlab/parity.py:43` (`"nativeha-rhel"`→`"nativeha-rhel-crr"`)
+- Modify: `src/mqlab/clusterboard.py` (board map + `nha_rhel_a/b` / `NHARAPP` selectors)
+- Modify: `ansible/observability.yml:17-44` (group conditionals `nha_rhel_a/b`→`nha_rhel_crr_a/b` + `NHARAPP` fallback→`NHARCAPP`)
 - Test: `tests/test_stacks.py`
 
 - [ ] **Step 1: Write the failing test.** In `tests/test_stacks.py`, extend the seeded `TOPO` literal to key the stack `nativeha-rhel-crr` with `short: NHARC`, and assert the derived names:
@@ -115,6 +115,7 @@ def test_crr_stack_names(monkeypatch, tmp_path):
     assert "nativeha-rhel-crr" in stacks
     assert stacks["nativeha-rhel-crr"].short == "NHARC"
     assert stacks["nativeha-rhel-crr"].qm.qm_app == "NHARCAPP"
+    assert stacks["nativeha-rhel-crr"].groups == ["nha_rhel_crr_a", "nha_rhel_crr_b"]
 ```
 
 - [ ] **Step 2: Run it — expect FAIL** (`KeyError: 'nativeha-rhel-crr'`):
@@ -123,13 +124,13 @@ def test_crr_stack_names(monkeypatch, tmp_path):
 vrg-container-run -- pytest tests/test_stacks.py::test_crr_stack_names -v
 ```
 
-- [ ] **Step 3: Rename in `lab/topology.yaml`.** Change the stack key `nativeha-rhel:` → `nativeha-rhel-crr:`, `short: NHAR` → `short: NHARC`, and `alloc.app_unit: app-nhar` → `app-nhar-crr`. Leave `groups`, `cluster_group`, `dr_groups`, node entries unchanged.
+- [ ] **Step 3: Rename in `lab/topology.yaml`.** Stack key → `nativeha-rhel-crr`, `short` → `NHARC`, `alloc.app_unit` → `app-nhar-crr`; `cluster_group`/`groups`/`dr_groups` and the group definitions `nha_rhel_a/b` → `nha_rhel_crr_a/b`; the 6 node entries `nha-rhel-{a,b}{1,2,3}` → `nha-rhel-crr-*` (keep their existing IPs — only the names change).
 
-- [ ] **Step 4: Update the hardcoded per-stack references** (not derived from `lab_stacks()`):
+- [ ] **Step 4: Update every remaining reference atomically** (so the CRR stack still works after this task):
+  - **Composing playbooks** — `ansible/site-nativeha.yml`, `_nativeha-cluster-ha.yml`, `_nativeha-dr-replication.yml`, `site-nativeha-switchover.yml`: group literals `nha_rhel_a/b` → `nha_rhel_crr_a/b` (in `hosts:`, `delegate_to`, and the `groups['nha_rhel_a'][0]` preflight), the node names in the inline `nha_site_nodes`, and `qm_app | default('NHARAPP')` → `default('NHARCAPP')`. (Task 4 later replaces these group literals with extra-vars.)
   - `src/mqlab/parity.py:43`: key `"nativeha-rhel"` → `"nativeha-rhel-crr"`.
-  - `src/mqlab/clusterboard.py`: the `"nativeha-rhel"` board-map key → `"nativeha-rhel-crr"`; `NHARAPP` QM literal → `NHARCAPP` (or derive from the stack — prefer deriving).
-  - `ansible/observability.yml:40-44`: the `NHARAPP` fallback → `NHARCAPP`.
-  - `ansible/site-nativeha-switchover.yml`: `qm_app | default('NHARAPP')` → `default('NHARCAPP')` (all occurrences).
+  - `src/mqlab/clusterboard.py`: board-map key → `"nativeha-rhel-crr"`; `nha_rhel_a/b` selectors → `nha_rhel_crr_a/b`; `NHARAPP` → `NHARCAPP` (prefer deriving from the stack).
+  - `ansible/observability.yml:17-44`: group conditionals `nha_rhel_a/b` → `nha_rhel_crr_a/b`; `NHARAPP` fallback → `NHARCAPP`.
 
 - [ ] **Step 5: Run the full unit suite — expect PASS** (catch every other reference via coverage):
 
@@ -230,7 +231,7 @@ def test_bootstrap_passes_replication_extravars(monkeypatch, tmp_path):
     provision = next(c for c in runner.recorded if "site-nativeha.yml" in " ".join(c.argv))
     joined = " ".join(provision.argv)
     assert "replication_mode=async" in joined
-    assert "nha_live_group=nha_rhel_a" in joined
+    assert "nha_live_group=nha_rhel_crr_a" in joined  # post-Task-2 rename
 ```
 
 - [ ] **Step 3: Run it — expect FAIL** (extra-vars not present):
@@ -467,16 +468,16 @@ vrg-commit --type feat --scope bench --message "purpose-built Native HA benchmar
 **Files:**
 - Create: `lab/scripts/bench-sweep.sh` (orchestrates the matrix; heavy logic here, not `--cov=src`)
 - Modify: `src/mqlab/cli.py` (thin `bench` Typer verb shelling the sweep script)
-- Create: `epics/227-nativeha-crr-irr-latency/results/` report (or a `docs/reports/` comparison report)
+- Create: `docs/reports/<YYYY-MM-DD>-crr-vs-irr-latency-comparison.md` (the report) + the JSONL results artifact alongside it in `docs/reports/`
 - Test: `tests/test_cli_bench.py`
 
-- [ ] **Step 1: Write `lab/scripts/bench-sweep.sh`** — for each `mode ∈ {crr, irr}` and each `delay ∈ {0,5,10,20,40}ms` (one representative `--msg-size`/`--offered-rate`, alignment-settled), `mqlab netem set --delay <d>`, run `bench_client.py` against the mode's QM, append the JSONL record, then `mqlab netem clear`. Both stacks may be measured in parallel (no contention) or one-at-a-time — a flag.
+- [ ] **Step 1: Write `lab/scripts/bench-sweep.sh`** — for each `mode ∈ {crr, irr}` and each one-way `delay ∈ {0, 5, 10, 20, 40} ms` (alignment defaults; tunable in a dry-run): `mqlab netem set --delay <d>`, run `bench_client.py` against the mode's QM with **2 KiB persistent** messages, **30 s warmup / 120 s steady-state measure**, percentiles at **80 % of the measured ceiling**, append the JSONL record, then `mqlab netem clear`. Both stacks may be measured in parallel (no contention) or one-at-a-time — a flag.
 
 - [ ] **Step 2–5: TDD the thin `bench` verb** (mirror Task 6): `mqlab bench sweep [--parallel] [--out <path>]` shells `bench-sweep.sh`; assert argv + failure propagation via RecordingRunner; 100% coverage.
 
 - [ ] **Step 6: Run the first-pass experiment** on the resized lab; collect the JSONL results artifact.
 
-- [ ] **Step 7: Write the comparison report** — the headline deliverable. Plot/tabulate IRR-vs-CRR sustained-throughput ceiling and commit-latency percentiles vs injected latency; identify the knee (if within 0–40 ms) where strict-sync falls off; state the fidelity claim (relative, native x86, one representative size/rate — first pass, not the full surface). Data vs judgment clearly separated.
+- [ ] **Step 7: Write the comparison report** at `docs/reports/<YYYY-MM-DD>-crr-vs-irr-latency-comparison.md` — the headline deliverable. Plot/tabulate IRR-vs-CRR sustained-throughput ceiling and commit-latency percentiles vs injected latency; identify the knee (if within 0–40 ms) where strict-sync falls off; state the fidelity claim (relative, native x86, one representative size/rate — first pass, not the full surface). Data vs judgment clearly separated.
 
 - [ ] **Step 8: Validate + commit** the report + results.
 

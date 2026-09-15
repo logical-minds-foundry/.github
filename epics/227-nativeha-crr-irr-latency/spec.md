@@ -99,19 +99,23 @@ IRR config details it has not verified.
 Replication **mode** becomes the distinguishing axis, encoded in the 4-char `short`
 (QM names derive from it; well under MQ's 48-char limit):
 
-| Member | Stack | `short` | QM name | Replication |
-|---|---|---|---|---|
-| CRR (async) | `nativeha-rhel` **→ renamed** | `NHAR` **→ `NHARC`** | `NHARAPP` **→ `NHARCAPP`** | Cross-region, asynchronous |
-| IRR (strict-sync) | **new** `nativeha-rhel-irr` | `NHARI` | `NHARIAPP` | In-region, `SyncConsistency=Strict` |
+| Member | Stack | `short` | QM name | Groups | Nodes | Replication |
+|---|---|---|---|---|---|---|
+| CRR (async) | `nativeha-rhel` **→ `nativeha-rhel-crr`** | `NHAR` **→ `NHARC`** | `NHARAPP` **→ `NHARCAPP`** | `nha_rhel_a/b` **→ `nha_rhel_crr_a/b`** | `nha-rhel-a1..3/b1..3` **→ `nha-rhel-crr-*`** | Cross-region, async |
+| IRR (strict-sync) | **new** `nativeha-rhel-irr` | `NHARI` | `NHARIAPP` | `nha_rhel_irr_a/b` | `nha-rhel-irr-*` | In-region, `SyncConsistency=Strict` |
 
-The existing arm **renames in place** to the explicit CRR member (per approved option:
-preserve OS identity, add a mode letter). The rename has a real blast radius to handle as
-a migration: the switchover default `qm_app | default('NHARAPP')`
-(`site-nativeha-switchover.yml`), `alloc.app_unit: app-nhar`, exporter port assignments,
-the Grafana dashboard folder "Native HA (RHEL)", app connection config, the
-`mq-nativeha-rhel9` box wiring, and docs. The IRR sibling mirrors the `nativeha-ubuntu`
-"clone with different fields" precedent (`lab/topology.yaml:470-488`): its own `short`,
-`alloc` ports/`app_unit`, and provisioning.
+The existing arm gets a **full rename** to the explicit CRR member — stack key, `short`,
+QM, **and the node/group names**. Renaming the nodes/groups is not gratuitous churn: it
+*serves* a load-bearing constraint — each arm's nodes are uniquely named by arm precisely
+so all arms can **coexist**, which this epic actively exercises (CRR and IRR running
+together). Leaving CRR's nodes as bare `nha-rhel-*` beside `nha-rhel-irr-*` would break
+that symmetry. The rename is **atomic** (see plan Task 2): every reference moves at once —
+topology nodes/groups, the switchover `qm_app` default, `alloc.app_unit`, exporter ports,
+the Grafana board selectors, `observability.yml` group conditionals, and the composing
+playbooks' group literals — so the CRR stack works after the rename; Task 4 then replaces
+those group literals with the parameterized extra-vars. The IRR sibling mirrors the
+`nativeha-ubuntu` "clone with different fields" precedent (`lab/topology.yaml:470-488`) on
+its own six nodes and a fresh host-octet block.
 
 ### 3.2 Two parallel independent stacks
 
@@ -266,17 +270,24 @@ validation of the extended arm; and the doc / doc-review / retrospective bookend
   minimum-necessary-complexity.
 - **netem: goal-stated, not mechanism-pinned** (§3.4) — attach point is a Task-5 detail
   verified by a measured-RTT-both-directions probe.
-- **Throughput-ceiling metric: operationally defined** (§3.5) — numbers tunable at
-  alignment, definition frozen before Task 6.
+- **Throughput-ceiling metric: operationally defined** (§3.5) — definition frozen before
+  Task 6; numbers settled at alignment (below).
 
-**Remaining for alignment / Task 1:**
+**Settled (alignment, 2026-09-15):**
+
+- **CRR full rename** (§3.1) — stack key, `short`, QM, **and** node/group names all move,
+  atomically, to serve the arm-coexistence constraint.
+- **Benchmark numbers** (tunable in a Task-8 dry-run): persistent **2 KiB** messages;
+  one-way latency sweep **{0, 5, 10, 20, 40} ms** (RTT 0–80 ms); **30 s warmup / 120 s
+  steady-state measure**; latency percentiles reported at **80 % of the measured
+  throughput ceiling**.
+- **Results artifact + comparison report location:** `docs/reports/`.
+
+**Remaining for Task 1 (the only pre-build unknown):**
 
 1. **IRR exact config & version floor** — resolved by the Task-1 facts spike before any
    build; the spec deliberately leaves the stanza/port/`SyncConsistency`-placement/floor
    specifics to that spike.
-2. **Benchmark numbers** — the representative message size/rate for the first pass, the
-   latency-sweep points, the steady-state window length, and the ~80 % percentile-report
-   fraction.
 
 ## 7. Verification & acceptance
 
