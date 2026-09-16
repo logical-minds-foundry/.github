@@ -7,6 +7,34 @@
 - **Status:** design (brainstorm output), pending pushback + human review
 - **Date:** 2026-09-15
 
+## ⚠️ Descoped 2026-09-16 — read this first
+
+The IRR-setup facts spike (#1103) established that IBM MQ 10.0 **IRR is a two
+single-instance (1 + 1) DR-*without*-HA topology** — two groups each of a single instance,
+synchronously replicated (`SyncReplication=Yes` + `SyncConsistency`, with the
+`NativeHAInstance` stanzas *absent*), and (per the IBM docs) active-role arbitration via a
+shared-file lock — **not** a 3 + 3 synchronous sibling of CRR.
+
+This invalidates the epic's motivating premise. A CRR-vs-IRR sync/async comparison is
+**not apples-to-apples**: it pits *HADR + async* (CRR — a 3-node HA group per site) against
+*DR-only + sync* (IRR — a single instance per site, no local HA, manual failover). One can
+quantify the performance cost of synchronous replication, but not what *losing local HA*
+costs in outage, reputation, and data-integrity terms — so the comparison would be a
+misleading half-measurement.
+
+**Descope decision (2026-09-16):**
+
+- **Kept (all four PRs merged):** the CRR rename (#1104 — leaves the door open for a
+  future IRR arm), the `mqlab netem` WAN-latency knob (#1105 — independently valuable for
+  DR testing), the benchmark client (#1106), and this evaluation (#1103).
+- **Cut:** the IRR build (#1107 / #1108 / #1109 — **deferred** to a future, dedicated IRR
+  epic) and the CRR-vs-IRR comparison study (#1110 — **invalidated**).
+
+Everything below is preserved as the original R&D design record; §3 onward describes the
+IRR build and the comparison that were **not** carried out.
+
+---
+
 ## 1. Problem & motivation
 
 The Native HA arm today runs **one** queue manager per stack, replicated **CRR**
