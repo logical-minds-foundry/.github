@@ -40,6 +40,17 @@ and the `mq-metric-samples` exporter (`v6.0.0`, just bumped). Do not touch eithe
   a bump that touches one is a bug. Reconciling the *existing* drift
   (`mq_metric_samples_ref: "master"` vs the role's `v6.0.0`; `grafana: ""`) is
   part of this epic's hygiene, not a separate concern.
+  - **The role default is bake-authoritative.** `lab/boxes/build-fatbox.sh`
+    bakes from the role defaults and does **not** read the manifest — the obs
+    overlay (`_obs_manifest_args`) is injected only at *bring-up*
+    (`site-obs`/`site-logsearch`, the configure half, which never reinstalls) and
+    for `gather-versions` reporting. So editing only the manifest bumps nothing
+    that ships in the box; **Grafana's bake-authoritative pin lives in
+    `group_vars/all/versions.yml` (`grafana_version`), not the manifest.** A
+    guardrail test (added by the plan) asserts role↔manifest agreement so the
+    mirror can never silently lie about the baked version — the exact failure
+    that let `mq_metric_samples_ref` drift to `master` while the box built
+    `v6.0.0`.
 - **Data vs. judgment stays separated.** Every version/date/asset fact in §3 is
   attributable to an upstream source; the upgrade/hold calls on top are labelled
   judgment. A reviewer can re-verify the data without trusting the judgment.
