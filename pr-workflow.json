@@ -1,0 +1,20 @@
+{
+  "schema_version": 2,
+  "issue": "177",
+  "branch": "feature/177-nha-crr-contract",
+  "base": "origin/develop",
+  "status": "ready",
+  "created_at": "2026-09-16T19:57:16Z",
+  "updated_at": "2026-09-16T19:57:16Z",
+  "git": {
+    "base_sha": "4ddfb046065cfd3794cb2a993a50bf78b9401dc3",
+    "head_sha": "58684f44987f45505f851ee51b66c920d20235ba"
+  },
+  "pr_metadata": {
+    "title": "docs(epic): Native HA / CRR metric contract + golden sample",
+    "summary": "Add the Wave 2 nha-crr-metric-contract.md for epic #169: the cluster_nha_* custom collector's exact metric names, labels, source CLI (dspmq -o nativeha -x/-g), parsing rules and emission logic (verbatim from nativehastate.py), the CRR link/lag/role + quorum/in-sync output mapping, a live-captured golden /metrics block, and the naming-reconciliation section.",
+    "notes": "Golden block captured live 2026-09-16 from node nha-rhel-crr-a1 against the running NHARCAPP QM (MQ 10.0, quorum 3/3, Recovery CRR group linked with a real 46-message backlog / INSYNC no). Metric names/labels/emission are copied verbatim from mq-resiliency-lab-for-linux src/mqlab/nativehastate.py @ develop b37e1d8; downstream clusterboard.py already binds these exact names, so nothing is invented. Two commits (doc + a markdownlint MD032 blank-line fix); vrg-validate green. Separate finding to flag (not part of this doc): the deployed collector timer is currently not emitting because nativehastate.py line 194 uses Python-2 except syntax and fails to compile on Py3 \u2014 the golden capture was produced by running the collector against live dspmq with that one line patched; recommend a lab-repo issue to fix it. The v6.0.0 mq-metric-samples obs-exporter refresh was intentionally NOT performed (large/destructive, unrelated to this node-exporter textfile collector) \u2014 see the session report.",
+    "linkage": "Ref"
+  },
+  "submitted": null
+}
