@@ -54,12 +54,14 @@ representations. Concretely:
   but not the *leadership-moved* window, and they are per-task special-casing.
 - **Split authorization representation.** Authorization is applied two ways today. Most grants
   use the `setmqaut` control command in a per-grant loop driven by `authz_grants`
-  (`ansible/group_vars/all/authz.yml`); the loop is copy-pasted across all four arms
-  (`site-nativeha-ubuntu.yml:188-201`, `site-nativeha.yml`, `site-rdqm.yml:404-418`,
-  `roles/mq-pcmk-qmgr/tasks/main.yml:142-166`). But the `mqmon` grants **already** moved to
-  MQSC `SET AUTHREC` (`authz_mqmon_grants`, `authz.yml:64-69`) and travel in the shared,
-  arm-agnostic `authz.mqsc.j2`. So the lab already has one foot in AUTHREC; the rest is a
-  half-finished migration.
+  (`ansible/group_vars/all/authz.yml`); the loop is copy-pasted across the **three arms that
+  have Stage-2 authz today** (`site-nativeha-ubuntu.yml:188-201`, `site-rdqm.yml:404-418`,
+  `roles/mq-pcmk-qmgr/tasks/main.yml:142-166`). The fourth arm, `nativeha-rhel-crr`
+  (`site-nativeha.yml`), has **no** `setmqaut` loop and no Stage-2 authz at all — authz is
+  net-new there (§3.3). But the `mqmon` grants **already** moved to MQSC `SET AUTHREC`
+  (`authz_mqmon_grants`, `authz.yml:64-69`) and travel in the shared, arm-agnostic
+  `authz.mqsc.j2`. So the lab already has one foot in AUTHREC; the rest is a half-finished
+  migration.
 
 Root cause of the race, stated once: **the lab treats "where is the QM active" as a value to
 compute and cache, when it is a property to re-check per operation.** Root cause of the split:
@@ -149,7 +151,10 @@ loops. Each grant's `setmqaut -t <type> [-n <obj>] -g <group> <+auths>` maps to
   `nativeha-ubuntu`, `nativeha-rhel-crr` (`site-nativeha.yml`), `rdqm` (`site-rdqm.yml`),
   `pcmk` (`roles/mq-pcmk-qmgr`). On **`nativeha-rhel-crr` authorization is net-new** — the
   epic #74 Stage-2 fan-out never reached that arm — so there it is *add authz via AUTHREC*,
-  not a migration.
+  not a migration. Net-new authz there includes ensuring the `mqapp`/`mqmon`/`mqsvc` OS
+  accounts + groups (the same identities the other arms use) are provisioned on every
+  `nha_rhel_crr` instance — `SET AUTHREC GROUP('…')` and the SSLPEERMAP `MCAUSER` targets
+  require those groups to exist on each failover node (the OS-replication caveat).
 - **Deliverable 2 (apply-to-active primitive) — the two Native HA arms only.**
   `nativeha-ubuntu` (reference) then `nativeha-rhel-crr`. These are the only arms with the
   raft re-election churn. `rdqm` (per-host `rdqm_is_active` + `when`-guard, plus a VIP) and
@@ -221,9 +226,11 @@ way the `mq_prometheus` exporter already connects. It was rejected during design
   retries are **gone from the Native HA path**, replaced by the single §3.1 primitive. This
   criterion is Native-HA-scoped: `rdqm`/`pcmk` **retain** their own `AMQ8146E` readiness
   handling (e.g. `site-rdqm.yml:387-402`), which D2 does not touch.
-- Authorization on all four arms is applied via `SET AUTHREC` in `authz.mqsc.j2`; the four
-  `setmqaut` loops are removed (or, for any grant with no AUTHREC form, that grant is retained
-  as an explicitly documented exception — no silent split).
+- Authorization on all four arms is applied via `SET AUTHREC` in `authz.mqsc.j2`; the **three**
+  existing `setmqaut` loops (`nativeha-ubuntu`, `rdqm`, `pcmk`) are removed and
+  `nativeha-rhel-crr` gains authz net-new — no fourth loop exists to remove. (For any grant
+  with no AUTHREC form, that grant is retained as an explicitly documented exception — no
+  silent split.)
 - `nativeha-rhel-crr` gains its previously-missing Stage-2 authorization, via AUTHREC.
 - `rdqm` and `pcmk` continue to build clean (targeting change verified not to regress them).
 
