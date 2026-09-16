@@ -46,6 +46,7 @@ standalone `REFRESH SECURITY TYPE(AUTHSERV)` tasks on `nativeha-ubuntu`, `rdqm`,
 runs on the pinned `active_host`; D2 (Task 3) fixes targeting afterward.
 
 **Files:**
+
 - Modify: `ansible/group_vars/all/authz.yml` (reshape `authz_grants` to AUTHREC form)
 - Modify: `ansible/roles/mq-pcmk-qmgr/templates/authz.mqsc.j2` (render `authz_grants`; add AUTHSERV refresh)
 - Modify: `ansible/site-nativeha-ubuntu.yml:188-201` (delete setmqaut loop) and `:203-212` (delete standalone REFRESH SECURITY AUTHSERV)
@@ -53,6 +54,7 @@ runs on the pinned `active_host`; D2 (Task 3) fixes targeting afterward.
 - Modify: `ansible/roles/mq-pcmk-qmgr/tasks/main.yml:142-166` (delete setmqaut loop; delete any standalone AUTHSERV refresh)
 
 **Interfaces:**
+
 - Produces: `authz_grants` in AUTHREC shape `{group, objtype, [profile], authadd}` and an
   `authz.mqsc.j2` that renders both `authz_grants` and `authz_mqmon_grants` — consumed
   unchanged by every arm that already renders the template, and by Tasks 2 and 4.
@@ -129,9 +131,11 @@ the deny-all back-stop + SSLPEERMAP maps, and applies the AUTHREC grants from Ta
 **Depends on:** Task 1 (the AUTHREC form of `authz_grants` and the updated template).
 
 **Files:**
+
 - Modify: `ansible/site-nativeha.yml` (add authz render + apply after the base MQSC, ~after line 130)
 
 **Interfaces:**
+
 - Consumes: `authz.mqsc.j2`, `authz_grants`, `authz_mqmon_grants`, `authz_chlauth_maps`,
   `authz_accounts` (unchanged from Task 1); `chl_to_app` = `{{ qm_svc_name }}.{{ qm_name }}`.
 - Produces: `NHARCAPP` with the same Stage-2 posture as `NHAUAPP`.
@@ -197,12 +201,14 @@ vrg-commit --type feat --scope authz \
 remaining MQSC steps).
 
 **Files:**
+
 - Create: `ansible/tasks/apply-mqsc-nha-active.yml` (the reusable loop wrapper)
 - Create: `ansible/tasks/_apply-mqsc-nha-active-once.yml` (one resolve+apply attempt)
 - Modify: `ansible/site-nativeha-ubuntu.yml` (replace the pinned steps with includes; remove
   the `find active` / `set_fact active_host` pin at `:88-112`; wrap the event-monitor include)
 
 **Interfaces:**
+
 - Produces: an include `apply-mqsc-nha-active.yml` parameterized by
   `nha_qm` (QM name), `nha_group` (inventory group of the cluster nodes), and **one of**
   `nha_mqsc_file` (path to a rendered MQSC file on the target) or `nha_mqsc_inline` (a
@@ -375,10 +381,12 @@ vrg-commit --type feat --scope nativeha \
 proven).
 
 **Files:**
+
 - Modify: `ansible/site-nativeha.yml` (replace the pin + pinned steps with the primitive; wrap
   the event-monitor include as in Task 3)
 
 **Interfaces:**
+
 - Consumes: `ansible/tasks/apply-mqsc-nha-active.yml` (from Task 3), `nha_group: nha_rhel_crr_a`.
 
 - [ ] **Step 1: Convert `site-nativeha.yml`'s pinned steps** (base MQSC `:102-120`, the
@@ -404,7 +412,7 @@ vrg-commit --type feat --scope nativeha \
 
 ## Task sequencing & the epic's bookends
 
-```
+```text
 Task 1 (D1 migrate) ──┬─▶ Task 2 (D1 net-new rhel-crr) ──┐
                       └─▶ Task 3 (D2 primitive + ubuntu) ─┴─▶ Task 4 (D2 fan-out rhel-crr)
                                                                         │

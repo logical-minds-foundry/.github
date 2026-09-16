@@ -184,7 +184,7 @@ way the `mq_prometheus` exporter already connects. It was rejected during design
 
 ## §4 — Scope
 
-**In scope**
+### In scope
 
 - The reusable *apply-to-active* primitive (§3.1) and its adoption on `nativeha-ubuntu`
   (reference), retiring the `active_host` pin and the #435/#888 standalone retries there.
@@ -195,7 +195,7 @@ way the `mq_prometheus` exporter already connects. It was rejected during design
 - **Cold-rebuild validation** proving the failover-window race no longer recurs (bookend
   `mq-resiliency-lab-for-linux#913`).
 
-**Out of scope**
+### Out of scope
 
 - **Client-mode `runmqsc -c` admin** — considered and rejected (§3.4).
 - **A separate bring-up "stability gate"** — the original design's "wait for leadership to
