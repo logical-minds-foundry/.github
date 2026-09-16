@@ -73,6 +73,7 @@ fixes the one existing divergence. This is TDD in the real sense — the test fa
 on the live drift, and reconciling the manifest makes it pass.
 
 **Files:**
+
 - Create: `tests/test_obs_version_sync.py`
 - Modify: `manifests/_shared/observability.yaml`
 - Reference: `src/mqlab/manifest.py:126` (`_OBS_VAR_MAP`),
@@ -80,6 +81,7 @@ on the live drift, and reconciling the manifest makes it pass.
   `src/mqlab/mqexporter.py` (`MQ_EXPORTER_REF`)
 
 **Interfaces:**
+
 - Consumes: `_OBS_VAR_MAP` (manifest-key → ansible-var map), `MQ_EXPORTER_REF`.
 - Produces: `test_role_default_matches_manifest` — the guardrail every later
   bump task relies on staying green.
@@ -186,10 +188,12 @@ vrg-commit --type test --scope obs \
 ### Task 2: node_exporter 1.8.2 → 1.12.1 (all 8 boxes)
 
 **Files:**
+
 - Modify: `ansible/roles/node-exporter/defaults/main.yml` (`node_exporter_version`)
 - Modify: `manifests/_shared/observability.yaml` (`node_exporter`)
 
 **Interfaces:**
+
 - Consumes: the guardrail test from Task 1 (must stay green).
 - Produces: nothing consumed by later code tasks; VAL-A/VAL-B validate the bake.
 
@@ -202,6 +206,7 @@ for a in arm64 amd64; do
     "https://github.com/prometheus/node_exporter/releases/download/v1.12.1/node_exporter-1.12.1.linux-$a.tar.gz"
 done
 ```
+
 Expected: `200` for both.
 
 - [ ] **Step 2: Bump both sources of truth.** Set `node_exporter_version: "1.12.1"`
@@ -228,6 +233,7 @@ vrg-commit --type chore --scope node-exporter \
 ### Task 3: Grafana Alloy 1.3.1 → 1.19.2 (all 8 boxes)
 
 **Files:**
+
 - Modify: `ansible/roles/alloy/defaults/main.yml` (`alloy_version`; retire the
   `# confirm current stable in Task 11` comment)
 - Modify: `manifests/_shared/observability.yaml` (`alloy`)
@@ -240,6 +246,7 @@ for a in arm64 amd64; do
     "https://github.com/grafana/alloy/releases/download/v1.19.2/alloy-linux-$a.zip"
 done
 ```
+
 Expected: `200` for both.
 
 - [ ] **Step 2: Bump both sources of truth** and delete the stale comment.
@@ -271,6 +278,7 @@ vrg-commit --type chore --scope alloy \
 the pair in lockstep (spec §3).
 
 **Files:**
+
 - Modify: `ansible/roles/loki/defaults/main.yml` (`loki_version`; retire the
   `# confirm current stable in Task 11` comment)
 - Modify: `manifests/_shared/observability.yaml` (`loki`)
@@ -283,6 +291,7 @@ for pkg in loki logcli; do for a in arm64 amd64; do
     "https://github.com/grafana/loki/releases/download/v3.7.7/$pkg-linux-$a.zip"
 done; done
 ```
+
 Expected: `200` for all four.
 
 - [ ] **Step 2: Bump both sources of truth** and delete the stale comment.
@@ -315,6 +324,7 @@ time, and the bake never reads the manifest. Pinning only the manifest would
 leave the baked Grafana floating.
 
 **Files:**
+
 - Modify: `ansible/group_vars/all/versions.yml` (`grafana_version` `""` → `"13.2.2"`)
 - Modify: `manifests/_shared/observability.yaml` (`grafana` `""` → `"13.2.2"`)
 - Modify: `ansible/roles/grafana/tasks/install.yml` (add an `apt-mark hold` step —
@@ -328,6 +338,7 @@ for a in amd64 arm64; do
     | grep -q "^Version: 13.2.2" && echo "$a 13.2.2 present" || echo "$a MISSING"
 done
 ```
+
 Expected: both `present`.
 
 - [ ] **Step 2: Pin in both sources of truth.** `grafana_version: "13.2.2"`;
@@ -366,6 +377,7 @@ decision** (comment on the epic): upgrade to **3.13.3 (LTS)** vs **3.14.0
 (current)** vs **defer**. Execute Task 7 only on a "go".
 
 **Files:**
+
 - Read: `ansible/roles/prometheus/templates/prometheus.yml.j2`,
   `ansible/roles/prometheus/files/lab.rules.yml`,
   `ansible/roles/prometheus/tasks/{install,configure}.yml`
@@ -392,6 +404,7 @@ decision** (comment on the epic): upgrade to **3.13.3 (LTS)** vs **3.14.0
 ### Task 7 (GATED — only on Task 6 = go): Prometheus 2.53.2 → 3.x (obs box)
 
 **Blocked-by:** Task 6 decision = go. **Files:**
+
 - Modify: `ansible/roles/prometheus/defaults/main.yml` (`prometheus_version`)
 - Modify: `manifests/_shared/observability.yaml` (`prometheus`)
 - Modify: `ansible/roles/prometheus/templates/prometheus.yml.j2` and/or
@@ -438,6 +451,7 @@ the blocking impl tasks are filed (epic-create step 9).
 ## Self-review
 
 **Spec coverage:**
+
 - §3 low-risk bumps → T2 (node_exporter), T3 (alloy), T4 (loki+logcli),
   T5 (grafana). ✅
 - §5 Wave 2 manifest hygiene → T1 (exporter-ref reconcile + comment refresh). ✅
