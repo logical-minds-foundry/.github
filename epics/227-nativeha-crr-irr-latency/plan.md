@@ -10,6 +10,17 @@
 
 **Spec:** `epics/227-nativeha-crr-irr-latency/spec.md` (in this repo, `logical-minds-foundry/.github`). Executors read the spec and this plan together.
 
+## ⚠️ Descoped 2026-09-16 — read this first
+
+The IRR-setup facts spike (#1103) found IBM MQ 10.0 **IRR is a 1 + 1 DR-without-HA topology**, not a 3 + 3 sync sibling of CRR — invalidating the sync-vs-async comparison premise (see the descope banner in `spec.md`).
+
+- **Cut:** the IRR build path — role `replication_mode` (Task 3 / #1107), playbook parameterization (Task 4 / #1108), the IRR stack (Task 5 / #1109) — and the sweep + comparison report (Task 8 / #1110). Tasks 3/4/5 are deferred to a future IRR epic; Task 8 is invalidated.
+- **Kept & shipped (all four PRs merged):** the CRR rename (Task 2 / #1104), the `mqlab netem` knob (Task 6 / #1105), the benchmark client (Task 7 / #1106), and the IRR facts report (Task 1 / #1103).
+
+The task breakdown below is preserved as the original plan; **Tasks 3, 4, 5, and 8 were not carried out.**
+
+---
+
 ## Global Constraints
 
 - **MQ version:** single-source pin `lab/mq-version` = `10.0.0.0`. Never hardcode a version; read the pin. Role floor asserts `>= 9.4.4`; raise/gate only if Task 1 proves IRR needs a higher floor.
