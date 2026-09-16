@@ -148,13 +148,16 @@ def test_exporter_ref_agrees_three_ways():
     )
 ```
 
-- [ ] **Step 2: Run it, confirm it fails on the live drift.**
+- [ ] **Step 2: Run validation, confirm RED on the live drift.**
 
-Run: `vrg-container-run -- uv run pytest tests/test_obs_version_sync.py -v`
-Expected: `test_exporter_ref_agrees_three_ways` FAILS —
-`manifest mq_metric_samples_ref != MQ_EXPORTER_REF` (`master` != `v6.0.0`).
+Run: `vrg-container-run -- vrg-validate`
+Expected: FAILS in the pytest stage — `test_exporter_ref_agrees_three_ways`
+reports `manifest mq_metric_samples_ref != MQ_EXPORTER_REF` (`master` != `v6.0.0`).
 (`test_role_default_matches_manifest` passes: the other five already agree,
-including `grafana_version` `""` == manifest `grafana` `""`.)
+including `grafana_version` `""` == manifest `grafana` `""`.) This is the RED
+signal — the guardrail catching the real drift.
+> `vrg-validate` is the **only** sanctioned validation entry (CLAUDE.md); it runs
+> the pytest suite + coverage. No bare `pytest`/`uv run` outside it.
 
 - [ ] **Step 3: Reconcile the manifest drift.** In
   `manifests/_shared/observability.yaml`: set `mq_metric_samples_ref: "v6.0.0"`
@@ -163,18 +166,15 @@ including `grafana_version` `""` == manifest `grafana` `""`.)
   latest stable; next coordinated move is 3.9.0 (unreleased, ~2026-09-29)`. Leave
   `grafana: ""` as-is (Task 5 pins it).
 
-- [ ] **Step 4: Run tests, confirm green.**
-
-Run: `vrg-container-run -- uv run pytest tests/test_obs_version_sync.py -v`
-Expected: both tests PASS.
-
-- [ ] **Step 5: Full validate.**
+- [ ] **Step 4: Run validation, confirm GREEN.**
 
 Run: `vrg-container-run -- vrg-validate`
-Expected: PASS (100% branch coverage — the new test's helpers must all execute;
-the two test functions cover both branches of the helper).
+Expected: PASS — both guardrail tests green (the reconcile closed the drift), and
+100% branch coverage holds (the new test's helpers must all execute; the two test
+functions together cover both branches of `_yaml_scalar`). This single command is
+both the GREEN check and the full gate.
 
-- [ ] **Step 6: Commit.**
+- [ ] **Step 5: Commit.**
 
 ```bash
 vrg-commit --type test --scope obs \
