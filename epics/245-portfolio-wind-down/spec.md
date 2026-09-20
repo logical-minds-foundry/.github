@@ -76,7 +76,7 @@ finite deliverable).
 | Epic | What | State | Notes |
 |---|---|---|---|
 | #161 | Public-release site docs (consumer path, no internal tooling) | PARTIAL | Biggest single lift; spec+plan exist, authoring + release-pipeline tasks remain |
-| #8 + #169 | Complete, **honest** lab dashboards | PARTIAL | Merge #8's dashboard-honesty bug-fixes (#381 empty cockpit, #383 empty panels, #183 channel metrics, #194 log streaming) with a **fresh rebuild** of the dashboards (#169). Rebuilt from scratch for the lab — the prior work-context versions are inaccessible, which also keeps them unambiguously the Foundry's own |
+| #8 + #169 | Complete, **honest** lab dashboards | PARTIAL | Merge #8's dashboard-honesty bug-fixes (#381 empty cockpit, #383 empty panels, #183 channel metrics, #194 log streaming) with a **fresh rebuild** of the dashboards (#169). Rebuilt from scratch for the lab — the prior work-context versions are inaccessible, which also keeps them unambiguously the Foundry's own. Scope **includes surfacing events and log entries** for the queue manager and for specific objects, built on the already-shipped log-availability tier (#145 / #149 / #198, all closed) |
 | #236 | Component version-currency refresh | NEARLY DONE | Research complete; low-risk bumps + manifest reconcile. Prometheus 2→3 breaking change stays gated/deferred. Expect a few further routine bumps as part of finishing |
 | #104 | Clean one-shot cold build | STANDING | One focused reliability pass so an outsider gets a working cold rebuild; underpins validation `#1150` |
 | #29 / #60 / #206 | Standing ad-hoc umbrellas (lab / .github / docs) | STANDING | Kept **open** for the live repos; not deliverables. #128 (observability) is **closed** when its repo is archived — an archived repo carries no open "ongoing work" umbrella |
@@ -94,13 +94,18 @@ with #8's other advanced items; ship only the dashboard-honesty fixes.
 | #17 | Concurrent multi-stack lab | PARTIAL |
 | #19 | MQ configuration guides | PARTIAL |
 | #165 | Discovery-native MQ administration + AUTHREC migration | NOT-STARTED |
-| #191 | Native HA log-lifecycle observability (Ubuntu) | NOT-STARTED |
+| #191 | Native HA log-lifecycle observability — **deep** log-lifecycle introspection (Ubuntu) | NOT-STARTED |
 
 - **#12 before suspension:** cherry-pick any publish-critical documentation
   (e.g. "document the lab as published software", methodology) into the #161 ship
   work first, so nothing publish-blocking is parked by accident.
-- **#191 escalation:** promote to ship **only** if the finished dashboards look
-  incomplete without the log-lifecycle band; otherwise park.
+- **#191 clarified:** this is the *deep* introspection of Native HA log-lifecycle
+  behaviour — the corner-case log metrics that matter for stability — and is **not
+  yet implemented**; it was forward-planning work that may or may not be picked up.
+  It is **not** part of the shippable dashboards and stays suspended. It is
+  distinct from the already-shipped log *availability* tier (#145 / #149 / #198,
+  all closed) that the ship dashboards build on to surface events and log entries
+  (§4.1).
 
 ### 4.3 Drop — retro + close as won't-do
 
