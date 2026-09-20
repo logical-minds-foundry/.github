@@ -250,7 +250,7 @@ wiring for missing metrics.
       child by comment.
 
 **Acceptance:** every shipped panel shows real data or is intentionally removed;
-#8 and #169 finished, retro'd, and closed.
+epics #8 and #169 finished, retro'd, and closed.
 
 ### Task 12: Public-release site docs (drive #161)
 
@@ -302,8 +302,8 @@ retro'd and closed.
       open** (like #29/#60/#206); do **not** retro/close it. Close this #245 child
       by comment when the reliability-pass PR(s) merge.
 
-**Acceptance:** a cold clone builds and boots the lab without author intervention;
-#104 remains open as a standing umbrella.
+**Acceptance:** a cold clone builds and boots the lab without author intervention,
+and epic #104 remains open as a standing umbrella.
 
 ### Task 15: Download / release path (make it obtainable & runnable)
 
@@ -328,50 +328,71 @@ Each is a retirement task (retro + close), parked not deleted. The retro's §5
 records what remained so it is a clean re-entry point (spec §9).
 
 ### Task 16: Suspend epic #7 — mqlab CLI maturation
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] Close open #7 children as won't-do (parked); `epic-retrospective` on #7
       recording what shipped (the working CLI) vs the DX/advanced-command-group work
       parked; close #245 child by comment.
+
 **Acceptance:** #7 CLOSED (parked) with a retrospective.
 
 ### Task 17: Suspend epic #9 — distributed HA/DR & vendor DR
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] `epic-retrospective` on #9 (NOT-STARTED; record the design intent as the
       re-entry point); close children if any; close #245 child by comment.
+
 **Acceptance:** #9 CLOSED (parked) with a retrospective.
 
 ### Task 18: Suspend epic #12 — productization & knowledge transfer (cherry-pick first)
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** T12 (doc cherry-pick)
+
 - [ ] **Before parking:** confirm T12 has cherry-picked any publish-critical #12
       docs (lab-as-published-software, methodology) into #161. Do not park until
       that is done (avoids parking publish-blocking docs).
 - [ ] Close open #12 children as won't-do; `epic-retrospective` on #12; close #245
       child by comment.
+
 **Acceptance:** #12 CLOSED (parked); no publish-critical doc left behind.
 
 ### Task 19: Suspend epic #17 — concurrent multi-stack lab
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] `epic-retrospective` on #17; close children; close #245 child by comment.
+
 **Acceptance:** #17 CLOSED (parked) with a retrospective.
 
 ### Task 20: Suspend epic #19 — MQ configuration guides
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] `epic-retrospective` on #19; close children; close #245 child by comment.
+
 **Acceptance:** #19 CLOSED (parked) with a retrospective.
 
 ### Task 21: Suspend epic #165 — discovery-native MQ administration
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] `epic-retrospective` on #165 (spec+plan freshly written, #239; NOT-STARTED —
       record it as a ready-to-go re-entry point); close children; close #245 child
       by comment.
+
 **Acceptance:** #165 CLOSED (parked) with a retrospective.
 
 ### Task 22: Suspend epic #191 — deep Native HA log-lifecycle introspection
+
 **Home:** `.github` · **Kind:** retirement · **Blocked-by:** none
+
 - [ ] `epic-retrospective` on #191: record it as the *deep* log-lifecycle
       introspection (corner-case log metrics for stability), forward-planning, not
       implemented; distinct from the shipped log-availability tier. Close children;
       close #245 child by comment.
+
 **Acceptance:** #191 CLOSED (parked) with a retrospective.
 
 ---
@@ -379,19 +400,25 @@ records what remained so it is a clean re-entry point (spec §9).
 ## Phase 5 — Archive repos
 
 ### Task 9: Archive `mq-protocol-gateway`
+
 **Home:** `.github` (op tracked as #245 child) · **Kind:** operational (human-gated)
 · **Blocked-by:** T3
+
 - [ ] Confirm T3 lifted keepable material and #268's retro is merged.
 - [ ] **Human-gated:** a human archives the repo (read-only) in GitHub settings.
 - [ ] Close #245 child by comment noting the archived repo URL.
+
 **Acceptance:** repo archived read-only; nothing deleted.
 
 ### Task 10: Archive `mq-resiliency-observability` + close umbrella #128
+
 **Home:** `.github` · **Kind:** operational (human-gated) · **Blocked-by:** T4
+
 - [ ] Confirm #79 retired (T4) and observability stays in the lab.
 - [ ] **Human-gated:** a human archives the repo (read-only).
 - [ ] Close ad-hoc umbrella **#128** with a "repo archived — see #245" note.
 - [ ] Close #245 child by comment.
+
 **Acceptance:** obs repo archived; #128 closed; observability continues in the lab.
 
 ---
@@ -399,8 +426,10 @@ records what remained so it is a clean re-entry point (spec §9).
 ## Phase 6 — Docs sweep + org narrative (bookend #1149)
 
 ### Task 23: Documentation-review sweep (already seeded as #1149)
+
 **Home:** `mq-resiliency-lab-for-linux` · **Kind:** doc-review sweep ·
 **Blocked-by:** T7, T8, T9, T10, T11, T12, T13, T14, T15
+
 - [ ] Sweep every repo's README/status to state its **real** final state: lab =
       v1 public product; SWIFT lab = published POC; obs + protocol-gw = archived;
       `.github`/`docs` = live.
@@ -409,6 +438,7 @@ records what remained so it is a clean re-entry point (spec §9).
 - [ ] Spawn per-repo doc tasks wherever docs need changes outside the lab repo,
       each closed by a same-repo PR.
 - [ ] Validate; PRs; `report-ready`.
+
 **Acceptance:** no README/narrative implies in-flight work except the live-repo
 umbrellas (#29/#60/#206); each repo's status is honest.
 
@@ -417,8 +447,10 @@ umbrellas (#29/#60/#206); each repo's status is honest.
 ## Phase 7 — Close-out
 
 ### Task 24: Validation — outsider cold-run of the public lab (already seeded as #1150)
+
 **Home:** `mq-resiliency-lab-for-linux` · **Kind:** validation · **Blocked-by:**
 T8, T11, T12, T13, T14, T15
+
 - [ ] Precondition self-check: lab is public and site docs (T12) are merged.
 - [ ] As the pinned persona — IBM MQ Developer Edition entitlement + documented
       host minimums — from a **cold clone**, following **only public site docs**,
@@ -426,17 +458,21 @@ T8, T11, T12, T13, T14, T15
       data.
 - [ ] Record `Outcome: SUCCESS` (or FAILURE with specifics → stays open) as a
       comment.
+
 **Acceptance:** SUCCESS recorded; the product is demonstrably runnable by a stranger.
 
 ### Task 25: Retrospective — portfolio-wind-down (terminal, already seeded as #247)
+
 **Home:** `.github` · **Kind:** retrospective · **Blocked-by:** every other #245
 child closed
+
 - [ ] Run `epic-retrospective` on #245. Preflight refuses until #245 is the only
       open child. Author `epics/245-portfolio-wind-down/retrospective.md`: what
       shipped (public lab, SWIFT POC), what was retired and why, what was parked as
       re-entry points (§5 forward axis — the suspended epics), and the outcome of
       the archival decisions.
 - [ ] Docs PR; `report-ready`. Its merge closes #245.
+
 **Acceptance:** retrospective merged; #245 closed; wind-down complete.
 
 ---
@@ -444,6 +480,7 @@ child closed
 ## Self-review
 
 **Spec coverage:**
+
 - §3 roster → T6/T8 (SWIFT rename+public), T9 (protocol-gw archive), T10 (obs
   archive), ship phase (lab), T23 (docs/.github status). ✓
 - §4.1 ship → T11 (#8+#169 dashboards incl. events/log entries), T12 (#161),
@@ -469,6 +506,7 @@ retro); the dependency graph and the per-task Blocked-by agree. Retirement vs
 coordination vs code/operational kinds are used consistently per the Task model. ✓
 
 **Resolved in alignment (2026-09-20):**
+
 - Finite ship epics **#8, #169, #161, #236** each get finished *and* retro'd via
   their own `epic-retrospective` (T11–T13) — they are delivered product work and
   deserve a record. **#104** is a standing ad-hoc umbrella: T14 does the
