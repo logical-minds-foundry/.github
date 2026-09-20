@@ -258,7 +258,7 @@ the OpenSearch *unit* value — natural additions for B's guardrail test.
   note.
 - **B — bounded fail-loud readiness budgets + fatality + guardrail** → issue
   **#1162**, plan **Tasks 3–4**. Task 3: inventory every systemd `TimeoutStartSec`
-  + Ansible readiness wait, right-size to the nested reality, set fatality by
+  and Ansible readiness wait, right-size to the nested reality, set fatality by
   data-path dependence; land the inventory as a `docs/reports/` note. Task 4: add
   `tests/test_startup_budgets.py` asserting each service unit template declares a
   bounded `TimeoutStartSec` in range (mirroring `test_logsearch_budgets.py`).

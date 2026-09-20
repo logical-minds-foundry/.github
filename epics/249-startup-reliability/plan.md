@@ -175,11 +175,11 @@ fatal iff the data/message path depends on it (spec §3, §4.3).
 - Create: `docs/reports/2026-09-20-startup-budget-inventory.md`
 - Modify (as the inventory dictates): the systemd unit templates / inline units and
   their paired Ansible waits — `ansible/roles/mqweb/templates/mqweb.service.j2:13`
-  + `mqweb/tasks/main.yml:103`; `opensearch/tasks/install.yml:120` (unit) +
+  with `mqweb/tasks/main.yml:103`; `opensearch/tasks/install.yml:120` (unit) with
   `opensearch/tasks/configure.yml:38`; `opensearch-dashboards/tasks/install.yml:90`
-  + `configure.yml:51`; `data-prepper/tasks/install.yml:98` + `configure.yml:28`;
-  and the peripheral units currently defaulting to 90 s where that is too tight for
-  a JVM-adjacent service.
+  with `configure.yml:51`; `data-prepper/tasks/install.yml:98` with
+  `configure.yml:28`; and the peripheral units currently defaulting to 90 s where
+  that is too tight for a JVM-adjacent service.
 
 **Interfaces:**
 
