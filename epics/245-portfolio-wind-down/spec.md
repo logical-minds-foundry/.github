@@ -40,8 +40,14 @@ closes.
 - **Correctness over cost.** We finish the small amount of ship work properly
   rather than publishing a half-working product with a "fix later" note.
 - **Everything technical is shareable.** There is no proprietary code or data;
-  publishing is safe. Business/relationship specifics are kept out of public
-  wording (see §8).
+  everything was kept generic, and the prior engagement has no interest in it.
+  Publishing is safe. A **non-gating** secret scan runs over history before any
+  repo is flipped public, as cheap insurance; business/relationship specifics are
+  kept out of public wording (see §8).
+- **Retire, don't delete.** Repos we stop working on are **archived** (read-only),
+  never deleted. The historical record has value — including as an archaeological
+  trace of what was tried and abandoned — and archiving is reversible if a
+  direction is ever resumed.
 - **The product is proven by an outsider, not by us.** "Shippable" means a
   stranger can download and cold-run it (validation bookend `#1150`), not that it
   runs on the author's machine.
@@ -53,9 +59,12 @@ closes.
 | `mq-resiliency-lab-for-linux` | public | **Keep + finish** — the public, downloadable, runnable product |
 | `docs` | public | **Keep** — update org narrative/roadmap to the new direction |
 | `.github` | public | **Keep** — org config + this epic |
-| `mq-resiliency-observability` | public | **Archive** (confirm at its epic review; likely archive read-only) |
+| `mq-resiliency-observability` | public | **Archive** (read-only) — and close its umbrella #128 |
 | `mq-gateway-replay-lab` | private | **Rename → `mq-swift-settlement-lab`, make public** — SWIFT example lab; retains the request/reply confirmation-tracking example |
-| `mq-protocol-gateway` | private | **Delete** — never meaningfully started (empty C++ scaffold) |
+| `mq-protocol-gateway` | private | **Archive** (read-only) — never meaningfully started (empty C++ scaffold), but kept as the historical first-C++ trace |
+
+**No repo is deleted.** Every repo we stop working on is archived (read-only),
+per §2. Archival is reversible and preserves code, history, and issues.
 
 ## 4. Epic dispositions
 
@@ -70,7 +79,7 @@ finite deliverable).
 | #8 + #169 | Complete, **honest** lab dashboards | PARTIAL | Merge #8's dashboard-honesty bug-fixes (#381 empty cockpit, #383 empty panels, #183 channel metrics, #194 log streaming) with a **fresh rebuild** of the dashboards (#169). Rebuilt from scratch for the lab — the prior work-context versions are inaccessible, which also keeps them unambiguously the Foundry's own |
 | #236 | Component version-currency refresh | NEARLY DONE | Research complete; low-risk bumps + manifest reconcile. Prometheus 2→3 breaking change stays gated/deferred. Expect a few further routine bumps as part of finishing |
 | #104 | Clean one-shot cold build | STANDING | One focused reliability pass so an outsider gets a working cold rebuild; underpins validation `#1150` |
-| #29 / #60 / #128 / #206 | Standing ad-hoc umbrellas (lab / .github / observability / docs) | STANDING | Kept **open** for the kept repos; not deliverables |
+| #29 / #60 / #206 | Standing ad-hoc umbrellas (lab / .github / docs) | STANDING | Kept **open** for the live repos; not deliverables. #128 (observability) is **closed** when its repo is archived — an archived repo carries no open "ongoing work" umbrella |
 
 From #8, the advanced CLI drill runner (#119) is **not** ship scope — suspend it
 with #8's other advanced items; ship only the dashboard-honesty fixes.
@@ -99,7 +108,7 @@ with #8's other advanced items; ship only the dashboard-honesty fixes.
 |---|---|---|---|
 | #79 | Standalone observability extraction (installable package) | NOT-STARTED | Low |
 | #66 | IBM defect reports cache | STANDING | **Archive the dossiers as evidence first**, then close; no filing path remains |
-| #268 | Stateless MQ protocol gateway | PARTIAL (heavy) | **~15 open child tasks** — heaviest retirement; drives `mq-protocol-gateway` deletion |
+| #268 | Stateless MQ protocol gateway | PARTIAL (heavy) | **~15 open child tasks** — heaviest retirement; drives `mq-protocol-gateway` archival |
 | #228 | MQ message-exit capability | PARTIAL | ~4 open child tasks |
 | #59 | Generic request-reply reconciliation | DONE (core) | ~2 wrap-up tasks; effectively just close it |
 
@@ -108,9 +117,9 @@ telemetry, #175 traffic realism, #235 least-privilege) are already **closed** �
 consistent with "the SWIFT work is done; rename and publish the repo."
 
 **Rename conflict to honour:** dropped epic #268 contains a task (#272) to rename
-`mq-protocol-gateway`. That is moot — the protocol-gateway repo is deleted, and
-the SWIFT rename (`mq-gateway-replay-lab → mq-swift-settlement-lab`) is the one
-that stands.
+`mq-protocol-gateway`. That is moot — the protocol-gateway repo is archived, not
+renamed, and the SWIFT rename (`mq-gateway-replay-lab → mq-swift-settlement-lab`)
+is the one that stands.
 
 ## 5. Scope & work breakdown
 
@@ -137,11 +146,14 @@ alignment stage — see §5.4.
   example.
 - Flip the repo to public (human-gated).
 
-### 5.3 Delete protocol-gateway (constructive/destructive)
+### 5.3 Archive protocol-gateway
 
-- Extract anything worth keeping (e.g. the recorded `imqi.hpp` MQI C++ API-surface
-  findings) into the SWIFT lab or docs first.
-- Delete the `mq-protocol-gateway` repo. **Irreversible — human-gated** (§8).
+- Author #268's retrospective (homed in the SWIFT lab, where #268 lives) and,
+  where useful, lift keepable material — the recorded `imqi.hpp` MQI C++
+  API-surface findings and the counter-example — into the SWIFT lab or `docs`.
+  Archival already preserves everything, so this is good practice for
+  discoverability, not a guard against loss.
+- **Archive** the `mq-protocol-gateway` repo (read-only). Reversible; human-gated.
 
 ### 5.4 Retire the remaining epics (records)
 
@@ -152,14 +164,17 @@ close, with any open child tasks first closed as won't-do so
 - **Org (`.github`) epics:** #7, #9, #12, #17, #19, #165, #191 (suspend); #79, #66
   (drop).
 - **SWIFT-lab repo epics:** #228, #59 (drop). #268 (drop) is retired alongside the
-  protocol-gateway deletion.
+  protocol-gateway archival.
 
-**Open structural question for the plan/alignment stage:** whether each retirement
-is a formal child task of #245 (filed in the target epic's home repo, closed when
-that epic's retrospective lands) or is tracked here as a checklist and executed as
-each epic's own terminal `epic-retrospective` run. The placement law (a task lives
-where its closing PR lands; a PR only `Closes` an issue in its own repo) constrains
-the answer and must be respected either way.
+**Retirement mechanics (resolved).** Each retirement is a **child task of #245**,
+filed in its target epic's **home repo** (`.github` for the org epics; the SWIFT
+lab for #228/#59/#268). Each is *executed* by running `epic-retrospective` on the
+target epic — which lands that epic's retrospective in its own home and closes it —
+and the #245 child is marked done by a **completion comment**, never a cross-repo
+`Closes` (honouring the placement law: a PR only closes an issue in its own repo).
+Because these are #245 children, the auto-close rollup cannot fire until every
+retirement is done, so **#245 cannot close with WIP outstanding**. Cost accepted:
+roughly a dozen coordination tasks, in exchange for per-epic task visibility.
 
 ### 5.5 Docs sweep + org narrative (bookend #1149)
 
@@ -170,13 +185,14 @@ the answer and must be respected either way.
 
 ## 6. Sequencing, validation & closure
 
-1. **Drops first** — retire #59, #228, #268 (+ delete protocol-gateway), #79, #66.
+1. **Drops first** — retire #59, #228, #268 (+ archive protocol-gateway), #79, #66.
    Fastest reduction of the open-WIP surface; makes the portfolio legible early.
-2. **SWIFT publish** — rename, reframe, make public.
+2. **SWIFT publish** — rename, reframe, then (after a non-gating history secret
+   scan) make public.
 3. **Ship work** — dashboards, site docs, version-currency, cold-build pass; then
    the download/release path.
 4. **Suspends** — retro + park the remaining org epics (after #12 doc cherry-pick).
-5. **Archive** `mq-resiliency-observability` (confirmed at its review).
+5. **Archive** `mq-resiliency-observability` and close its umbrella #128.
 6. **Docs sweep** (#1149) across all repos.
 7. **Validation** (#1150) — an outsider downloads and cold-runs the lab; closes on
    a SUCCESS comment.
@@ -184,18 +200,26 @@ the answer and must be respected either way.
 
 ## 7. Acceptance criteria
 
-- `mq-resiliency-lab-for-linux` is public and an outsider can **download and
-  cold-run it** (validation #1150 = SUCCESS), with honest, complete dashboards and
-  public-release site docs.
+- `mq-resiliency-lab-for-linux` is public and the validation persona — **a user
+  with an IBM MQ Developer Edition entitlement and a Linux host meeting the
+  documented CPU/RAM/disk minimums** — can, **following only the public site
+  docs** and with no access to the author or any private tooling, bring the lab up
+  from a **cold clone** (validation #1150 = SUCCESS), with honest, complete
+  dashboards. (This forces the site docs to state the entitlement + host
+  requirements a real downloader needs.)
 - `mq-swift-settlement-lab` exists (renamed), is **public**, and its README
   presents a completed SWIFT proof-of-concept that bolts onto the lab.
-- `mq-protocol-gateway` is deleted; anything worth keeping was extracted first.
+- `mq-protocol-gateway` is **archived** (read-only); #268's retrospective is
+  written and keepable material lifted into a live repo first.
 - Every dropped epic (#79, #66, #268, #228, #59) is **closed** with a
   retrospective; #66's dossiers are archived.
 - Every suspended epic (#7, #9, #12, #17, #19, #165, #191) is **closed as parked**
   with a retrospective; no publish-critical #12 docs were lost.
-- `mq-resiliency-observability` disposition is executed (archived or as decided).
-- No open epics/tasks imply in-flight work except the standing ad-hoc umbrellas.
+- `mq-resiliency-observability` is **archived** (read-only) and its umbrella #128
+  is closed.
+- **No repo is deleted** — every retired repo is archived.
+- No open epics/tasks imply in-flight work except the standing ad-hoc umbrellas
+  for the live repos (#29 / #60 / #206).
 - Every kept/renamed/archived repo README and the `docs` org narrative state the
   true final status.
 - Epic #245's own retrospective (#247) is authored and merged.
@@ -206,10 +230,12 @@ the answer and must be respected either way.
   *Mitigation:* rebuild against the lab's own live metrics; the outsider cold-run
   validation catches empty/broken panels. Building fresh also removes any question
   of external provenance.
-- **Repo deletion is irreversible (`mq-protocol-gateway`).** *Mitigation:*
-  extract-worth-keeping step first; deletion is **human-gated**, never
-  agent-performed. Same gate for flipping the SWIFT repo public and cutting any
-  release.
+- **Archival, not deletion.** No repo is deleted; retired repos are archived
+  (read-only), preserving code, history, and issues, and archival is reversible.
+  This removes the earlier irreversibility risk entirely. The remaining one-way
+  step is flipping a repo **public** (practically irreversible once cloned/indexed)
+  — **human-gated**, preceded by a non-gating history secret scan. Cutting any
+  release is likewise human-gated, never agent-performed.
 - **Public wording of a business change.** The technical work is shareable; the
   fact of a specific engagement ending is not broadcast. *Mitigation:* public
   issue/README/narrative wording frames a **strategic refocus**, not the
