@@ -243,10 +243,14 @@ wiring for missing metrics.
       confirm every panel renders real data (no empty/placeholder panels). Capture
       before/after evidence in the PR.
 - [ ] Validate; PR(s); `report-ready`.
-- [ ] When #8 and #169 close, close this #245 coordination child by comment.
+- [ ] Close #119 (advanced CLI drill runner) and any other non-ship #8 children as
+      won't-do/parked with a wind-down note (spec §4.1) — so #8 can retro cleanly.
+- [ ] Run `epic-retrospective` on **#8** and on **#169** so each finite epic closes
+      with a record of the delivered dashboards. Then close this #245 coordination
+      child by comment.
 
 **Acceptance:** every shipped panel shows real data or is intentionally removed;
-#8 and #169 closed.
+#8 and #169 finished, retro'd, and closed.
 
 ### Task 12: Public-release site docs (drive #161)
 
@@ -262,10 +266,11 @@ wiring for missing metrics.
 - [ ] Cherry-pick any publish-critical docs from #12 before it is parked (coordinate
       with T18): "document the lab as published software", methodology.
 - [ ] Validate; PR(s); `report-ready`.
-- [ ] When #161 closes, close this #245 coordination child by comment.
+- [ ] Run `epic-retrospective` on **#161** so it closes with a record; then close
+      this #245 coordination child by comment.
 
 **Acceptance:** public site docs let the validation persona (T24) succeed from a
-cold clone; entitlement + host requirements documented; #161 closed.
+cold clone; entitlement + host requirements documented; #161 retro'd and closed.
 
 ### Task 13: Component version-currency (drive #236)
 
@@ -277,10 +282,11 @@ cold clone; entitlement + host requirements documented; #161 closed.
       guardrail. Keep the Prometheus 2→3 breaking change **gated/deferred** (spec §4.1).
 - [ ] Absorb any further routine bumps that surface while finishing (owner expects a
       few).
-- [ ] When #236 closes, close this #245 coordination child by comment.
+- [ ] Run `epic-retrospective` on **#236** so it closes with a record; then close
+      this #245 coordination child by comment.
 
 **Acceptance:** obs component versions current (Prometheus 3 excepted, gated); #236
-closed.
+retro'd and closed.
 
 ### Task 14: Cold-build reliability pass (drive #104)
 
@@ -292,9 +298,12 @@ closed.
       concrete breakages #104 tracks.
 - [ ] This is the code substrate the T24 validation exercises — keep them aligned.
 - [ ] Validate; PR(s); `report-ready`.
-- [ ] Close this #245 child by comment when the reliability pass is merged.
+- [ ] **#104 is a standing ad-hoc umbrella — do the reliability pass but leave #104
+      open** (like #29/#60/#206); do **not** retro/close it. Close this #245 child
+      by comment when the reliability-pass PR(s) merge.
 
-**Acceptance:** a cold clone builds and boots the lab without author intervention.
+**Acceptance:** a cold clone builds and boots the lab without author intervention;
+#104 remains open as a standing umbrella.
 
 ### Task 15: Download / release path (make it obtainable & runnable)
 
@@ -459,7 +468,10 @@ T9–T10 archive, T11–T15 ship, T16–T22 suspend, T23 sweep, T24 validation, 
 retro); the dependency graph and the per-task Blocked-by agree. Retirement vs
 coordination vs code/operational kinds are used consistently per the Task model. ✓
 
-**Open item for alignment:** confirm whether the ship epics (#8/#161/#236/#104)
-should each also get their *own* terminal retrospective (normal kept-epic
-lifecycle) in addition to closing, or whether #245's retrospective (T25) suffices
-for the wind-down narrative. Flag for the alignment stage.
+**Resolved in alignment (2026-09-20):**
+- Finite ship epics **#8, #169, #161, #236** each get finished *and* retro'd via
+  their own `epic-retrospective` (T11–T13) — they are delivered product work and
+  deserve a record. **#104** is a standing ad-hoc umbrella: T14 does the
+  reliability pass but leaves #104 open (like #29/#60/#206), no retro/close.
+- Spec §4.1's carve-out of **#119** (advanced CLI drill runner) is executed in
+  T11: closed won't-do/parked before #8's retrospective.
