@@ -115,8 +115,21 @@ JDKs) into `ansible/bake-obs.yml`, so **one box** ships the full platform; retir
 `ansible/bake-logsearch.yml` and the `logsearch-ubuntu2404` box from the fleet
 (`mqlab box`, `_LOCAL_BOX_BUILDERS`, manifest). The box **keeps the name
 `obs-ubuntu2404`** (it is still the obs box, now complete) — avoiding a fleet-wide
-rename. The box grows by the OpenSearch/Dashboards/Data-Prepper artifacts, so the
-**fat-box build-disk sizing** (recent 18 G work, #1145/#1147) is bumped to fit.
+rename.
+
+**Box-disk ceiling — an early gate, not a routine bump.** The merged box grows by
+the OpenSearch/Dashboards/Data-Prepper artifacts (+ bundled JDKs) on top of an obs
+box that **already consumed its disk headroom** (#1145/#1147). `build-fatbox.sh`
+pins the build disk at an **absolute 18 G because guests instantiate at
+`virtual_size:20`, and a partition over 20 G is truncated at guest-create — the
+GPT-corruption failure of #1144, fixed in #1146**. So "bump the disk" is **not**
+available past 20 G. Therefore the plan's **first step is a measurement gate**:
+confirm the merged *installed* footprint (union of the two current boxes over the
+shared ~8.7 G base) fits under 18 G. If it does not, a **scoped prerequisite** —
+either trim the footprint (dedupe base tooling, share one JDK, strip caches) or
+raise the box `virtual_size` fleet-wide (handled per #1146's truncation lesson) —
+runs **before** the merge. This gate protects the whole epic (everything rests on
+the box building).
 
 ### 5.3 Observe plays & phase code
 
@@ -149,10 +162,22 @@ targets, reach-peers, dashboards, the `mqlab logsearch` CLI namespace, and
 `all_vms`/groups/phase consumers in `src/mqlab` — to the obs host. The
 `mqlab logsearch` verbs keep working, now resolving to obs.
 
+**Concrete, two-pronged guardrail.** The retarget surface is wide (~29 files
+mention `logsearch`; **17 hardcoded `10.50.0.4` literals** across `src/`,
+`ansible/`, `lab/`, `manifests/`), and the IP literals are the easy miss — a
+guardrail that greps only the string `logsearch` passes a stranded `10.50.0.4`. So
+the guardrail test asserts **both**: (a) no `10.50.0.4` literal survives in the
+runtime paths (`src/`, `ansible/`, `lab/`, `manifests/`); and (b) no `logsearch`
+**host/group** reference remains in the topology/inventory consumers — distinct
+from the OpenSearch/Dashboards/Data-Prepper roles' own cluster/box-name usage,
+which moves *with* the services and is fine.
+
 ## 6. Sequencing & validation
 
-Implementation order (refined in the plan): (1) topology + box-bake merge (the
-foundation, requires a re-bake); (2) observe-play + phase-code retarget +
+Implementation order (refined in the plan): **(0) box-fit measurement gate** —
+confirm the merged installed footprint fits under 18 G (§5.2); if not, the scoped
+trim / `virtual_size` prerequisite runs first. Then (1) topology + box-bake merge
+(the foundation, requires a re-bake); (2) observe-play + phase-code retarget +
 localhost links; (3) heap coexistence + Dashboards timeout; (4) DNS/renders/`mqlab`
 retarget. These are largely one coherent change set; the plan will split them into
 reviewable tasks with a guardrail test where each is statically checkable.
@@ -184,11 +209,15 @@ timeout or migration deadlock. This feeds the paused VAL-A (`#1154`). A green
   host has ample capacity.
 - **Dashboards still deadlocks despite consolidation.** *Mitigation:* the
   `requestTimeout` bump (§5.4) directly targets it, independent of node size.
-- **Box grows beyond the build disk.** *Mitigation:* bump the fat-box build-disk
-  sizing (§5.2) as part of the bake change.
-- **A missed `logsearch` reference breaks bring-up** (a render/DNS/`mqlab`
-  consumer). *Mitigation:* a grep-sweep + a guardrail test asserting no
-  `logsearch`-node references remain; the cold-rebuild proves it end-to-end.
+- **Merged box overflows the hard 20 G guest-disk ceiling** (#1144/#1146) — "bump
+  the disk" is unavailable past 20 G. *Mitigation:* the §5.2 / §6 **early
+  measurement gate**; if it doesn't fit, a scoped trim (dedupe base tooling / share
+  one JDK / strip caches) or a `virtual_size` bump runs before the merge.
+- **A missed `logsearch` reference breaks bring-up** — especially a stranded
+  hardcoded `10.50.0.4`, which a name-only grep misses. *Mitigation:* the §5.5
+  **two-pronged guardrail** (no `10.50.0.4` literal in runtime paths; no `logsearch`
+  host/group reference in topology/inventory consumers); the cold-rebuild proves it
+  end-to-end.
 - **x86 regression.** *Mitigation:* the change is platform-agnostic (obs/logsearch
   are Ubuntu everywhere); parity is re-checked (no x86 regression) before closing.
 
