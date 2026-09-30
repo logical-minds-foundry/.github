@@ -26,11 +26,13 @@
 Build the perf data model and collect the timings the orchestrator already measures.
 
 **Files:**
+
 - Create: `src/mqlab/perf.py`
 - Create: `tests/test_perf.py`
 - Modify: `src/mqlab/orchestrator.py` (thread a `PerfSink` through `run_steps`)
 
 **Interfaces:**
+
 - Produces: `perf.PerfRecord` (dataclass) with `.add_step(phase: str, label: str, seconds: float, retries: int)`, `.add_milestone(name: str, seconds: float)`, `.to_json() -> str`, `.human_summary() -> str`; and `perf.PerfSink` (Protocol) with `.step(phase, label, seconds, retries) -> None`. A no-op `perf.NullSink` for callers that don't collect.
 - Consumes (from run_steps): the existing per-step `elapsed` and the step's `label`; the phase name (add a `phase: str` field to `CommandStep`, defaulting to "" so existing callers are unaffected until Task 3 sets it).
 
@@ -70,11 +72,13 @@ def test_perf_record_collects_steps_and_serialises():
 A background sampler that, during a bootstrap, periodically records each running guest's vCPU steal% and the host's CPU/I/O, into the PerfRecord.
 
 **Files:**
+
 - Create: `src/mqlab/perfsampler.py`
 - Create: `tests/test_perfsampler.py`
 - Modify: `src/mqlab/perf.py` (add `PerfRecord.add_sample(t, host_cpu, host_iowait, guests: dict[str, GuestSample])`)
 
 **Interfaces:**
+
 - Consumes: a `SampleSource` Protocol — `.host() -> HostSample` and `.guest(name) -> GuestSample` — so the sampler is testable with a fake source (real impl shells `virsh nodecpustats`/`nodeinfo` for the host and reads each guest's `/proc/stat` steal via ssh, using the same key/opts the driver uses).
 - Produces: `perfsampler.Sampler(record, source, guests, interval=15.0)` with `.start()` / `.stop()` (a daemon thread), degrading a failed probe to a recorded `note`, never raising into the bootstrap.
 
@@ -97,11 +101,13 @@ A background sampler that, during a bootstrap, periodically records each running
 Make `mqlab bootstrap` actually build a PerfRecord, run the sampler, tag each phase's steps with their phase name, capture the OpenSearch/boot milestones, and write the report to the run record.
 
 **Files:**
+
 - Modify: `src/mqlab/phases.py` (set `CommandStep.phase` on emitted steps; expose the observe milestone hooks)
 - Modify: `src/mqlab/cli.py` (bootstrap entry ~line 108: construct PerfRecord, start/stop Sampler around `run_steps`, write `<runrecord>/perf-<ts>.json` + print `human_summary()`)
 - Modify: `tests/` (cli/phases tests)
 
 **Interfaces:**
+
 - Consumes: `PerfRecord`, `PerfSink`, `Sampler` (Tasks 1–2); the run-record dir from `mqlab build path` (reuse the existing bootstrap output location — do NOT hardcode).
 - Produces: a `perf-<ts>.json` + human summary per bootstrap; milestones `opensearch_bound`, `opensearch_green`, `data_prepper_ready`, `dashboards_ready`, and per-VM `boot:<name>` seconds + `boot_retries:<name>`.
 
@@ -124,11 +130,13 @@ Make `mqlab bootstrap` actually build a PerfRecord, run the sampler, tag each ph
 Let the same stack run with different lever values per platform, so macOS can be throttled while cloud stays maximal — without forking topology.
 
 **Files:**
+
 - Modify: `lab/topology.yaml` (add an optional `env_profiles:` map: `{macos: {...overrides}, cloud: {...overrides}}`)
 - Modify: `src/mqlab/stacks.py` or wherever topology is loaded (apply the `MQLAB_ENV` profile overrides onto the base topology at load)
 - Create: `tests/test_env_profiles.py`
 
 **Interfaces:**
+
 - Consumes: `os.environ["MQLAB_ENV"]` (default `""` → base topology unchanged; unknown value → fail loud, no silent default).
 - Produces: the effective topology with the selected profile's overrides applied (deep-merge: a profile may set `boot_batch`, and per-node `cpus`). Everything downstream (phases `_boot_batch`, node vCPU) reads the effective topology, so no other call site changes.
 
@@ -151,11 +159,13 @@ Let the same stack run with different lever values per platform, so macOS can be
 One command to run the cold-bootstrap VAL and, given two run records (macOS + cloud), diff their perf reports for the bottleneck-shape comparison.
 
 **Files:**
+
 - Create: `src/mqlab/perfdiff.py` (+ a `mqlab perf diff <a.json> <b.json>` CLI subcommand in `cli.py`)
 - Create: `tests/test_perfdiff.py`
 - Create: `docs/development/perf-and-staging.md` (how to run the VAL on each arch with `MQLAB_ENV`, collect the two `perf-*.json`, and read the diff — with the grain-of-salt caveat: directional, not apples-to-apples)
 
 **Interfaces:**
+
 - Consumes: two `PerfRecord` JSONs (Task 1 format).
 - Produces: `perfdiff.diff(a: dict, b: dict) -> DiffReport` (per-phase seconds delta + ratio, per-milestone delta, top steal contributors on each side) and a human table; the CLI prints it. NO pass/fail verdict — it's a comparison aid, read with judgment.
 
