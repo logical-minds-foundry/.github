@@ -70,8 +70,10 @@ deliberately, not by default.
    with no version choice for them.
 3. **Stack identity stays version-free.** A stack name says *what* is built; the
    OS version is configuration of that build.
-4. Version tokens live in **exactly two places**: the catalog (`lab/versions.yaml`)
-   and resolved, OS-bearing artifact names (boxes, box caches, base boxes, ISOs).
+4. Version tokens appear only in the catalog (`lab/versions.yaml`) and in
+   resolved, OS-bearing artifact names (boxes, box caches, base boxes, ISOs), plus
+   the per-version vars and kickstart files that exist precisely to differ by
+   version. The §6 guardrail enforces this.
 5. The design admits the **MQ major version** as a second axis with no redesign
    (§8).
 
@@ -134,10 +136,36 @@ os: rhel:9        # follow-on epic adds:  mq: 9
 - There is no `--os` CLI shorthand: there is one way in, and it extends to the
   MQ axis unchanged.
 
-### 4.3 The resolver: `src/mqlab/versions.py`
+### 4.3 The resolver: `src/mqlab/versions.py`, a layer in the existing pipeline
 
-One module turns **stack + optional build file + host arch** into a **resolved
-spec**:
+The lab **already has a host resolver**:
+
+- `src/mqlab/platforms.py` `resolve` maps each node's `platform:` to a box and
+  chooses the provider mechanics (driver, firmware, cpu_mode, machine type).
+- `ensure_resolved` renders **every node** into
+  `build/work/lab/topology.resolved.yaml`.
+- `lab/Vagrantfile` is a dumb consumer of that file (#276).
+
+`versions.py` does **not** replace this pipeline and does not run alongside it.
+It is the **version layer in front of it**:
+
+1. `versions.py` owns the catalog, the build file and the instance records. For
+   each node it works out the role, the OS major and the concrete box name and pin:
+   - From the owning stack's instance record when one exists.
+   - Otherwise from the stack's default.
+   - For shared nodes, from `infra`.
+2. `platforms.resolve` takes that per-node box selection as input instead of a
+   `platform:` key. It keeps sole ownership of the provider mechanics.
+3. The rendered file carries the box-version pin per node. `box-versions.json` and
+   the Vagrantfile's lookup of it by `platform` are removed. The Vagrantfile stays a
+   dumb consumer.
+
+The render covers all stacks at once, so it **combines every stack's record**. Two
+stacks may run at once on different OS majors, for example `nativeha-ubuntu` on 24
+next to `pcmk-ubuntu` on 26.
+
+Given **stack + optional build file + host arch**, the version layer produces a
+**resolved spec** containing:
 
 - Each node's concrete box name. Shared nodes resolve against `infra`.
 - The per-version facts the bake and provisioning steps need: base box and
@@ -157,13 +185,21 @@ It is the single source for every consumer. The `case` tables in
 ### 4.4 The instance record
 
 Bootstrap writes `build/state/instances/<stack>.json`, containing the resolved
-spec plus the build-file inputs.
+spec plus the build-file inputs. It writes the record **before** rendering the
+resolved topology, so Vagrant sees the selected boxes from the first `vagrant up`.
 
 - Every later command on that stack reads it: `bootstrap --from/--only`, `status`,
   `teardown`, box checks and dashboard OS labels.
 - A `--config` that disagrees with an existing record is **refused** until
   `mqlab teardown <stack>`, so a running stack cannot silently switch versions
   mid-life.
+- **A live stack with no record is refused.** If a stack's domains are running but
+  it has no record, every command on it **except `teardown`** refuses with an
+  instruction to run `mqlab teardown <stack>` and re-bootstrap. This covers every
+  stack running when Phase 1 lands, and any lost record. `teardown` works without a
+  record because it destroys domains by name and needs no version. The lab never
+  falls back to the stack default for a running instance: after a default flip,
+  that would mislabel a 24.04 stack as 26 and bake the wrong boxes.
 - Teardown deletes the record.
 - It lives in `build/state/` (shared, irreplaceable live-lab facts) and is reached
   through the build-layout API, never a hard-coded path.
@@ -173,7 +209,7 @@ spec plus the build-file inputs.
 `lab/topology.yaml` stops naming concrete boxes:
 
 - Nodes declare a **box role**: `box: mq-nativeha | pcmk | mq-rdqm | infra | obs |
-  mq-client`.
+  mq-client | san`.
 - Stacks declare `os_family: ubuntu | rhel`.
 
 No version tokens remain. The existing `MQLAB_ENV` overlay mechanism is unchanged
@@ -183,7 +219,7 @@ and orthogonal.
 
 - **Physical (contains a fixed OS) → carries the short major.**
   - Boxes are `<role>-<os><major>`: `infra-ubuntu26`, `obs-ubuntu26`,
-    `mq-client-ubuntu26`, `mq-nativeha-ubuntu24`, `pcmk-ubuntu26`,
+    `mq-client-ubuntu26`, `san-ubuntu26`, `mq-nativeha-ubuntu24`, `pcmk-ubuntu26`,
     `mq-rdqm-rhel9`, `mq-nativeha-rhel10`.
   - Caches are `build/state/boxes/<box>-<arch>.box`.
   - RHEL base boxes are `rhel/<major>-x86_64`.
@@ -208,6 +244,38 @@ and orthogonal.
   resolved spec needs.
 - **The manifest hash** includes the OS major and its point or box pin, so a
   re-pin forces a re-bake.
+
+### 4.7.1 The SAN targets become a baked box (supersedes `.github#108`)
+
+Today `san-a`/`san-b` boot the bare Ubuntu base box. They install `drbd-utils`,
+`targetcli-fb` and `linux-modules-extra-*` from a deb pre-cache that
+`src/mqlab/sandeb.py` fills by running `apt-get download` **on the controller**.
+
+That downloads the *controller's* release. The controller (the Vergil VM) is
+Ubuntu 24.04. Once the SANs move to 26, cache hits would install noble packages on
+26.04 SANs and skip the roles' network fallback, with no warning.
+
+The #108 brainstorm rejected a SAN box as disproportionate (two payload-light VMs).
+This epic changes that trade-off:
+
+- A box is now a catalog role plus a bake playbook.
+- Baking installs on the target OS itself, which removes the controller-release
+  coupling.
+- Baking also fixes the existing `linux-modules-extra` kernel cache miss, because
+  the module is installed against the box's own kernel.
+
+So:
+
+- **New `san` box role**, resolved from `infra` (Ubuntu 26), giving
+  `san-ubuntu26-<arch>`.
+- **New `bake-san.yml`**, which runs the install half of `drbd-san` and
+  `iscsi-target`.
+- **Removed:** `sandeb.py`, the SAN deb cache, and the roles' cache-copy and
+  network-fallback branches. The roles keep their configure half. Install tasks
+  are skipped when the package is already baked, following the existing pattern.
+- **Validation:** covered by the `pcmk-ubuntu` validation rows (§6).
+
+The SAN path is a first-class demonstration arm, not a secondary concern.
 
 ### 4.8 Ansible indirection
 
@@ -243,7 +311,7 @@ and orthogonal.
 | Phase | Content | Proven by |
 |---|---|---|
 | **0: Spikes** | **S1** `cloud-image/ubuntu-26.04` libvirt boxes exist (amd64 + arm64) and boot under our Vagrant. **S2** IBM's support statement for MQ 10 (server + Native HA) on Ubuntu 26.04 and RHEL 10, fetched via `tools/ibm_doc_cache.py`, cited, with data kept apart from judgment; plus availability of Pacemaker, DRBD and `fence-agents-virsh` on 26.04. Pins the RHEL 10 point release. **S3** lab host KVM exposes x86-64-v3 to guests. | Recorded findings; go/no-go per family |
-| **1: Resolver refactor** | Catalog, build file, resolver, instance record, role-based topology, renames, version-free playbooks, vars indirection, `box gc` migration, all at **today's versions** (ubuntu24/rhel9). No behavior change. | Cold rebuild of every stack |
+| **1: Resolver refactor** | Catalog, build file, resolver, instance record, role-based topology, renames, version-free playbooks, vars indirection, `box gc` migration, version-token guardrail, all at **today's versions** (ubuntu24/rhel9). No behavior change, with one deliberate exception: the SAN targets move from cached debs to the baked `san` box (§4.7.1), first as `san-ubuntu24`, so the pcmk-ubuntu regression rebuild proves it before the re-pin to 26. | Cold rebuild of every stack |
 | **2: Ubuntu 26** | Catalog entry and role fix-ups; shared nodes and SANs move to 26; both Ubuntu stacks build on 24 and 26; default flips to 26 (subject to §4.1 gate). | Validation rows below |
 | **3: RHEL 10** | RHEL 10 base box, per-major vars; `nativeha-rhel-crr` builds on 9 and 10; default flips to 10 (subject to §4.1 gate). `rdqm-rhel` stays on 9. | Validation rows below |
 
@@ -270,8 +338,14 @@ Additionally:
 
 - The unit tests prove the resolver's failure modes: unsupported version, family
   mismatch, host gate, bad key, and record conflict.
-- The epic's acceptance includes a **grep gate**: no OS version token outside
-  `lab/versions.yaml`, resolved box names, and vars-file names.
+- **Version-token guardrail.** A pytest guardrail, following the logsearch-ref
+  guardrail pattern (f0b86c2), so `vrg-validate` runs it.
+  - **Scans:** `src/`, `lab/`, `ansible/` and `scripts/` for OS version tokens
+    (`ubuntu24`, `2404`, `noble`, `rhel9`, `9.6`, `el9`, and the 26/10 forms).
+  - **Exempt:** `lab/versions.yaml`, per-major kickstart files,
+    `ansible/**/vars/<Distribution>-<major>.yml`, and one explicit allow-list
+    entry for `box gc`'s retired-names table.
+  - **Excluded:** `docs/` and `tests/`.
 
 ## 7. Error handling
 
