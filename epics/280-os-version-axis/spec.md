@@ -228,8 +228,10 @@ and orthogonal.
   The point release is a catalog pin, so 9.6 → 9.7 is a re-pin and re-bake, never
   a rename. Ubuntu is LTS-only, so `26` is unambiguous.
 - **Logical → never versioned.** Stacks, nodes, inventory groups, QM names,
-  playbooks (`bake-mq-nativeha.yml`, not `bake-nativeha-ubuntu.yml`) and
-  dashboards.
+  playbooks and dashboards. Playbooks may carry the OS **family**, which is not a
+  version token (`bake-nativeha-ubuntu.yml`, never `bake-nativeha-ubuntu24.yml`).
+  The per-family playbook split that already exists is kept; merging the playbooks
+  is out of scope.
 
 ### 4.7 Box baking
 
@@ -334,6 +336,11 @@ DR bring-up plus the existing end-to-end check, **with a human dashboard review*
 
 The Phase 1 regression rebuild covers the 24 and 9 rows. The 26 and 10 rows run
 after Phases 2 and 3, and they also prove that the shared nodes work on Ubuntu 26.
+
+**Mixed-version re-validation.** After the shared nodes and SANs move to 26, a
+default 24 build always runs against 26 shared nodes. So each Ubuntu stack is
+re-validated at 24 against the 26 shared nodes. `pcmk-ubuntu` at 24 matters most:
+its cluster nodes on 24 are iSCSI initiators to DRBD-backed SAN targets on 26.
 Additionally:
 
 - The unit tests prove the resolver's failure modes: unsupported version, family

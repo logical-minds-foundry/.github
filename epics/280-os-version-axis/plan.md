@@ -105,7 +105,7 @@ Phase 1   T1 (catalog + resolver, pure)
           V1 validate: cold rebuild × 4 stacks @ ubuntu24/rhel9  [needs D1]
 Phase 2   T8 (Ubuntu 26 entry, role fix-ups, infra→26)  [needs V1, T0a, T0b]
           D2 deploy: bake ubuntu26 boxes  [needs T8]
-          V2 validate: nativeha-ubuntu@26, pcmk-ubuntu@26, nativeha-ubuntu@24-on-26-commons  [needs D2]
+          V2 validate: both Ubuntu stacks @26 + @24-on-26-commons  [needs D2]
           T9 flip Ubuntu stack defaults → 26 (if IBM-supported)  [needs V2]
 Phase 3   T10 (RHEL 10 entry, base box, vars, v3 gate)  [needs V1, T0a, T0b]
           D3 deploy: bake rhel/10 + mq-nativeha-rhel10  [needs T10; human stages RHEL 10 DVD]
@@ -925,7 +925,9 @@ Created with `--kind validation`, `--blocked-by D2`.
   - `nativeha-ubuntu` with `--config` set to `os: ubuntu:26`
   - `pcmk-ubuntu` with `--config` set to `os: ubuntu:26`
   - `nativeha-ubuntu` @ ubuntu24 (the default), now running on **ubuntu26 shared
-    nodes**: the mixed-version regression
+    nodes**: the mixed-version regression (spec §6)
+  - `pcmk-ubuntu` @ ubuntu24 (the default) against the **ubuntu26 SANs and shared
+    nodes**: cluster initiators on 24, DRBD-backed SAN targets on 26 (spec §6)
 - **For each row:** full DR, the end-to-end check, and a human dashboard review that
   confirms the OS labels read correctly.
 - **Acceptance:** all rows green; `Outcome: SUCCESS`.
