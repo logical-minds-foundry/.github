@@ -28,6 +28,7 @@ Developer edition, Ubuntu cloud images, RHEL DVD + kickstart.
 **Spec:** `epics/280-os-version-axis/spec.md` (this directory). Executors read both.
 
 **Repos:**
+
 - Implementation tasks land in `logical-minds-foundry/mq-resiliency-lab-for-linux`.
 - This plan and the spec live in `logical-minds-foundry/.github`.
 
@@ -124,9 +125,11 @@ while the other is paused on a spike finding.
 ### Task T0a: OS/MQ support matrix research (docs PR)
 
 **Files:**
+
 - Create: `docs/reference/os-version-support-matrix.md`
 
 **Interfaces:**
+
 - Produces:
   - For each of {Ubuntu 26.04, RHEL 10} × {MQ 10.0 server, Native HA, RDQM}: a cited
     status of `supported` / `unsupported` / `unknown`.
@@ -153,9 +156,11 @@ while the other is paused on a spike finding.
 ### Task T0b: Live spike — Ubuntu 26.04 base box + x86-64-v3 exposure (report PR)
 
 **Files:**
+
 - Create: `docs/reports/2026-10-os-axis-spike.md`
 
 **Interfaces:**
+
 - Produces:
   - The Vagrant Cloud box name and pinned version for Ubuntu 26.04 (amd64 + arm64),
     or a "not available" finding with the fallback chosen.
@@ -181,6 +186,7 @@ while the other is paused on a spike finding.
   `vrg-commit --type docs --scope reports --message "OS-axis spike: ubuntu-26.04 box + x86-64-v3"`.
 
 **Go/no-go:**
+
 - No 26.04 libvirt box → Phase 2 pauses (comment on the epic). Phase 3 proceeds.
 - No v3 flags under KVM on the cloud host → Phase 3 pauses. Phase 2 proceeds.
 
@@ -191,12 +197,14 @@ while the other is paused on a spike finding.
 ### Task T1: The catalog and the version resolver (pure)
 
 **Files:**
+
 - Create: `lab/versions.yaml`
 - Create: `src/mqlab/versions.py`
 - Modify: `src/mqlab/paths.py` (add `versions_catalog_path()`)
 - Test: `tests/test_versions.py`
 
 **Interfaces:**
+
 - Consumes: `mqlab.hostfacts.HostFacts` (`arch`, `kvm`), and `paths.repo_root()`.
 - Produces (exact; later tasks rely on these):
 
@@ -343,6 +351,7 @@ def test_default_must_not_be_ibm_unsupported(tmp_path):
   Write the unsupported-default fixture out in full: copy Step 1's YAML and add
   `ibm_support: { status: unsupported, source: "https://example.invalid" }` to the
   `ubuntu: 24` entry.
+
 - [ ] **Step 3:** Run `uv run pytest tests/test_versions.py -v`. Expected: it fails
   with `ModuleNotFoundError: mqlab.versions`.
 - [ ] **Step 4: Implement `src/mqlab/versions.py`.**
@@ -366,6 +375,7 @@ def test_default_must_not_be_ibm_unsupported(tmp_path):
 ### Task T4: Builders take catalog inputs; box renames; fleet from catalog
 
 **Files:**
+
 - Modify: `lab/boxes/build-fatbox.sh`. Delete the `case "$BOX"` table at `:76-87`.
   Add the required flags `--base-kind`, `--base-box`, `--base-box-version`, `--bake`,
   `--dvd` and `--os-pin`, and pass them through to `_manifest-hash.sh`.
@@ -404,6 +414,7 @@ def test_default_must_not_be_ibm_unsupported(tmp_path):
   Old box names become the new names, and new tests are added below.
 
 **Interfaces:**
+
 - Consumes: `versions.Catalog.all_boxes`, `BoxEntry`, `OsEntry` (T1).
 - Produces:
   - `box.FLEET: dict[str, BoxSpec]`, keyed by generated box name.
@@ -451,6 +462,7 @@ def test_gc_removes_retired_names(fake_vagrant_boxes):
   `run_hash`/`run_fatbox` are the existing subprocess helpers in
   `tests/test_build_fatbox_usage.py`. Reuse them. `_stale_box_meta_guests` is the pure
   helper `_reconcile_box_meta` already uses, or extract it if it's inline.
+
 - [ ] **Step 2:** `uv run pytest tests/test_box_build.py tests/test_cli_box.py tests/test_build_fatbox_usage.py -v`.
   Expected: these fail.
 - [ ] **Step 3:** Implement the shell flag changes. Each missing required flag exits 2
@@ -467,6 +479,7 @@ def test_gc_removes_retired_names(fake_vagrant_boxes):
 ### Task T2: Topology names roles; render goes through the version layer
 
 **Files:**
+
 - Modify: `lab/topology.yaml`.
   - Delete the `boxes:` registry.
   - Each node `platform: X` becomes `box: <role>`. The `san-a`/`san-b` nodes get no
@@ -512,6 +525,7 @@ def node_boxes(topo: dict[str, Any], catalog: Catalog, facts: HostFacts) -> dict
   `tests/test_clusterboard.py` and `tests/test_versions.py`.
 
 **Interfaces:**
+
 - Consumes: T1's `Catalog`, `BoxEntry` and `OsRef`; T4's renamed boxes.
 - Produces:
   - `versions.node_boxes(topo, catalog, facts) -> dict[str, BoxEntry]`.
@@ -557,6 +571,7 @@ def test_topology_has_no_boxes_registry():
 ### Task T3: `--config` build files, instance records, refusal rules
 
 **Files:**
+
 - Create/complete: `src/mqlab/instances.py`.
 - Modify: `src/mqlab/paths.py`. Add `instances_dir() -> Path` (`state("instances")`).
 - Modify: `src/mqlab/cli.py`.
@@ -573,6 +588,7 @@ def test_topology_has_no_boxes_registry():
   `tests/test_cli_teardown.py` and `tests/test_cli_status.py`.
 
 **Interfaces:**
+
 - Consumes: T1's `BuildFile`, `OsRef`, `Catalog.stack_os`, `load_build_file`; T2's
   `node_boxes`.
 - Produces:
@@ -648,6 +664,7 @@ def test_bootstrap_config_refused_before_any_lab_io(cli_harness, fake_runner):
   `catalog_24_26` and `catalog_with_default` are fixtures that write a temporary
   `versions.yaml` with `ubuntu: {24: …, 26: …}`. Point `load_catalog` at it via
   monkeypatching `paths.versions_catalog_path`.
+
 - [ ] **Step 2:** Run them. Expected: they fail.
 - [ ] **Step 3:** Implement `instances.py`, then the CLI wiring. A `VersionError` is
   caught at the CLI boundary, printed to stderr, and exits 2 **before** any `virsh` or
@@ -660,6 +677,7 @@ def test_bootstrap_config_refused_before_any_lab_io(cli_harness, fake_runner):
 ### Task T5: Ansible per-version vars indirection
 
 **Files:**
+
 - Create: `ansible/tasks/os-vars.yml`, the shared include:
 
 ```yaml
@@ -675,6 +693,7 @@ def test_bootstrap_config_refused_before_any_lab_io(cli_harness, fake_runner):
 
   `first_found` raises when nothing matches, and that is the fail-loud behavior we
   want. Do **not** add `skip: true` or an `errors: ignore`.
+
 - Create: `ansible/roles/rdqm-install/vars/RedHat-9.yml`. It defines `rhel_el_tag: el9`,
   `rdqm_dvd_repo_name: "RHEL {{ rhel_point }} DVD"`, `drbd_kmod_dir: el9/kmod-drbd-9`,
   `pacemaker_dir: el9/pacemaker-2` and `drbd_utils_dir: el9/drbd-utils-9`.
@@ -699,6 +718,7 @@ def test_bootstrap_config_refused_before_any_lab_io(cli_harness, fake_runner):
 - Test: `tests/test_ansible_os_vars.py`.
 
 **Interfaces:**
+
 - Produces: the `os-vars.yml` include contract. Callers set `os_vars_role`, and the
   role must ship a `vars/<Distribution>-<major>.yml` for every OS in the catalog that
   runs it. T8 and T10 add the 26 and 10 files.
@@ -725,6 +745,7 @@ def test_rdqm_install_has_no_el9_literal():
   Also derive `ROLES_WITH_OS_VARS`'s expected files from `lab/versions.yaml`. For each
   RHEL major in the catalog, each listed role must ship `RedHat-<major>.yml`. That way
   T10 adding `rhel: 10` makes this test fail until `RedHat-10.yml` exists.
+
 - [ ] **Step 2:** Run them. Expected: they fail. Implement. Then run
   `vrg-container-run -- vrg-validate` (it includes ansible-lint).
 - [ ] **Step 3:** Commit:
@@ -733,6 +754,7 @@ def test_rdqm_install_has_no_el9_literal():
 ### Task T6: Baked SAN box; retire the SAN deb cache (supersedes `.github#108`)
 
 **Files:**
+
 - Create: `ansible/bake-san.yml`. It runs the **install half** of `drbd-san` and
   `iscsi-target` (packages: `drbd-utils`, `targetcli-fb`,
   `linux-modules-extra-{{ ansible_kernel }}`), plus `entropy`, `node-exporter`,
@@ -762,6 +784,7 @@ def test_rdqm_install_has_no_el9_literal():
   `tests/test_cli_bootstrap.py` (no san prereq), and a new `tests/test_san_baked.py`.
 
 **Interfaces:**
+
 - Consumes: T1, T2, T4.
 - Produces: role `san` → box `san-<infra token>`, e.g. `san-ubuntu24` in Phase 1 and
   `san-ubuntu26` after T8.
@@ -792,10 +815,12 @@ def test_bootstrap_declares_no_san_prereq():
 ### Task T7: Version-token guardrail
 
 **Files:**
+
 - Create: `tests/test_version_token_guardrail.py`. Model it on the logsearch-ref
   guardrail added in f0b86c2, including its `__pycache__`/`.pyc` exclusion.
 
 **Interfaces:**
+
 - Consumes: the end state of T2, T3, T5 and T6. It must pass on `develop` the day it
   lands.
 
@@ -828,6 +853,7 @@ def test_no_os_version_tokens_outside_catalog():
                     hits.append(f"{rel}:{n}: {line.strip()}")
     assert not hits, "OS version tokens outside lab/versions.yaml (epic .github#280):\n" + "\n".join(hits)
 ```
+
 - [ ] **Step 2:** Run `uv run pytest tests/test_version_token_guardrail.py -v`. Fix
   every remaining hit at its source. Never widen `EXEMPT` to silence a real hit.
 - [ ] **Step 3:** Run `vrg-container-run -- vrg-validate`, then commit:
@@ -867,6 +893,7 @@ Created with `--kind validation`, `--blocked-by D1`.
 ### Task T8: Ubuntu 26 catalog entry, role fix-ups, infra → 26
 
 **Files:**
+
 - Modify: `lab/versions.yaml`.
   - Add `ubuntu: 26: { base_box: cloud-image/ubuntu-26.04, base_box_version: "<T0b pin>" }`,
     filling in the version string T0b recorded.
@@ -885,6 +912,7 @@ Created with `--kind validation`, `--blocked-by D1`.
 - Test: `tests/test_versions.py`.
 
 **Interfaces:**
+
 - Consumes: T0a and T0b findings; the T5 vars contract.
 
 - [ ] **Step 1: Write failing tests.**
@@ -903,6 +931,7 @@ def test_unsupported_selection_warns(capsys, catalog_26_unsupported):
 ```
 
   T5's catalog-derived vars test now requires the `Ubuntu-26.yml` files.
+
 - [ ] **Step 2:** Run them. Expected: they fail. Implement. Then run the full suite,
   coverage and `vrg-container-run -- vrg-validate` (the guardrail must stay green).
 - [ ] **Step 3:** Commit:
@@ -935,6 +964,7 @@ Created with `--kind validation`, `--blocked-by D2`.
 ### Task T9: Flip the Ubuntu stack defaults to 26
 
 **Files:**
+
 - Modify: `lab/versions.yaml` (`default: ubuntu:26` for `nativeha-ubuntu` and
   `pcmk-ubuntu`).
 - Test: `tests/test_versions.py`.
@@ -955,6 +985,7 @@ Created with `--kind validation`, `--blocked-by D2`.
 ### Task T10: RHEL 10 catalog entry, base box, vars, x86-64-v3 gate
 
 **Files:**
+
 - Modify: `lab/versions.yaml`.
   - Add `rhel: 10: { base_box: rhel/10-x86_64, point: "<T0a pin>", iso: "rhel-<T0a pin>-x86_64-dvd.iso", arch: x86_64, requires: [x86-64-v3] }`,
     plus `ibm_support` if T0a says so.
@@ -981,6 +1012,7 @@ Created with `--kind validation`, `--blocked-by D2`.
   `rhel/10-x86_64` and `mq-nativeha-rhel10` only on a v3 host).
 
 **Interfaces:**
+
 - Consumes: T0a (point release and support), T0b (v3 findings), the T5 vars contract.
 - Produces: `HostFacts.x86_64_v3: bool`.
 
