@@ -85,6 +85,7 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
    - commit pinned;
    - boxes rebaked to REUSE **outside** the timed run (record bake times);
    - cloud tickets: SSD boot disk proof (`lsblk ROTA=0`);
+   - macOS tickets (V1a, V4a): the `reserve huge pages` preflight step passes, and `MemAvailable` is recorded (`grep MemAvailable /proc/meminfo`) with commons up (spec §5 headroom);
    - `env -u MQLAB_ENV` resolves the expected env;
    - a `--config` file with `os: <explicit>` when the target isn't the default.
 2. **Cold:** `uv run mqlab teardown <stack> --commons`.
@@ -122,8 +123,11 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
 - Test: `tests/test_cli_status.py`.
 
 **Interfaces:**
-- Consumes: the existing `_probe_all(deps, stack) -> dict` and `build_states` / `first_unsatisfied(stack, states)` used by bootstrap, plus each stack's `qm-status` verb.
-- Produces: `mqlab status <stack> --check` exits **0 iff every phase is satisfied, including `provision` (the stack's `qm-status` verb passes) and `observe`**, else exits 1, printing the first unsatisfied phase. Without `--check`, behaviour is unchanged.
+- Consumes: the existing `_probe_all(deps, stack) -> dict` and `build_states` / `first_unsatisfied(stack, states)` used by bootstrap, plus each stack's `qm-status` verb. Bootstrap's observe probe only checks Prometheus targets, so `--check` adds a separate **obs health probe** (new).
+- Produces:
+  - `_probe_obs_health(deps) -> list[str]`, returning the names of failed obs checks (empty = healthy). Over the existing ssh-to-obs path, read-only: `systemctl is-active` for each obs unit (`opensearch`, `opensearch-dashboards`, `data-prepper`, `loki`, `prometheus`, `grafana-server`, `alloy`) and `curl -fsS localhost:9200/_cluster/health`, requiring `status == "green"`.
+  - `mqlab status <stack> --check` exits **0 iff every phase is satisfied (including `provision`, i.e. the stack's `qm-status` verb passes) AND `_probe_obs_health` returns no failures**. Otherwise it exits 1, printing the first unsatisfied phase or the failed obs checks.
+  - Without `--check`, behaviour is unchanged.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -141,6 +145,18 @@ def test_status_check_exits_nonzero_when_qm_not_up(fake_probes_qm_down, runner):
 def test_status_without_check_keeps_exit_zero(fake_probes_qm_down, runner):
     assert runner.invoke(app, ["status", "pcmk-ubuntu"]).exit_code == 0
 
+def test_status_check_fails_when_obs_degraded_but_targets_up(fake_probes_all_up, fake_obs_health, runner):
+    # Prometheus targets present (observe phase "satisfied") but OpenSearch yellow / Dashboards down.
+    fake_obs_health.failures = ["opensearch _cluster/health=yellow", "opensearch-dashboards inactive"]
+    result = runner.invoke(app, ["status", "nativeha-ubuntu", "--check"])
+    assert result.exit_code == 1
+    assert "opensearch" in result.output
+
+def test_obs_health_probe_reports_each_failed_unit(fake_ssh_obs):
+    fake_ssh_obs.inactive = {"loki"}
+    fake_ssh_obs.cluster_status = "green"
+    assert _probe_obs_health(fake_ssh_obs.deps) == ["loki inactive"]
+
 def test_status_check_requires_stack_name(runner):
     result = runner.invoke(app, ["status", "--check"])
     assert result.exit_code == 2
@@ -148,7 +164,10 @@ def test_status_check_requires_stack_name(runner):
 ```
 
 - [ ] **Step 2:** `uv run pytest tests/test_cli_status.py -q`. Expected: FAIL (no `--check` option).
-- [ ] **Step 3:** Implement `--check`. Reuse `_probe_all` and `first_unsatisfied`. Exit with `typer.Exit(1)` and print `mqlab status <stack> --check: <phase> not satisfied`. Require a stack name with `--check` (exit 2 with a usage error naming the full command).
+- [ ] **Step 3:** Implement `--check`.
+  - Reuse `_probe_all` and `first_unsatisfied`, then run `_probe_obs_health`. Its ssh call is bounded by the same timeouts as other read-only probes, and a probe that errors counts as a failed check, never as a pass.
+  - Exit with `typer.Exit(1)`, printing `mqlab status <stack> --check: <phase> not satisfied` or `… obs unhealthy: <failures>`.
+  - Require a stack name with `--check` (exit 2 with a usage error naming the full command).
 - [ ] **Step 4:** Run the tests: PASS. Then `vrg-container-run -- vrg-validate`: green.
 - [ ] **Step 5:** `vrg-commit --type feat --scope mqlab --message "mqlab status <stack> --check: scriptable clean-run check (#<T1>)"`.
 
@@ -372,7 +391,7 @@ def test_role_is_version_agnostic():
 - Test: `tests/test_ansible_cfg.py`. It parses `ansible.cfg`; `forks` is an integer ≥ 10, and `timeout`/`ConnectTimeout` are unchanged.
 
 - [ ] **Step 1–4:** Test → FAIL → change → PASS; `vrg-validate` green.
-- [ ] **Step 5:** `vrg-commit --type perf --scope ansible`. If `perf` isn't accepted, use `fix`: `"forks=20 for multi-host plays (#<T7>)"`.
+- [ ] **Step 5:** `vrg-commit --type fix --scope ansible --message "forks=20 for multi-host plays (#<T7>)"`. `vrg-commit` doesn't accept `perf`.
 
 ### Operational V7 (validation): forks keep/revert measurement
 

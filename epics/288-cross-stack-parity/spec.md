@@ -83,8 +83,9 @@ performance bar #275 set, by #275's method:
     `dspmq` reports it running; RDQM `rdqmstatus` HA status normal; Pacemaker with `mq_group`
     `Started` (the stricter check, §4 W2).
   
-  The plan confirms whether `mqlab status <stack>` already reports this in a scriptable way; if
-  so, it becomes the single check. With `--no-dr` no DR leg is checked. Any failure resets the
+  **The single check is `mqlab status <stack> --check`** (added by this epic). It exits 0 only when
+  every phase is satisfied, the stack's `qm-status` verb passes, all obs units are active and
+  OpenSearch is green. With `--no-dr` no DR leg is checked. Any failure resets the
   count and is classified, never retried until it passes.
 - **Per-stack targets, set from data, at two checkpoints:**
   - **W1 baseline review:** a provisional target only, the hard ceiling **20 min (1200 s)**, plus
@@ -126,12 +127,15 @@ so tool time limits can't kill them.
    pcs, resource-agents, fence-agents-virsh, with `update_cache: true`. See
    `roles/pcmk-cluster/tasks/install-Debian.yml`, `roles/pcmk-stonith/tasks/install-Debian.yml`;
    `roles/iscsi-initiator/tasks/install-Debian.yml` forces an apt update. [V]
-2. **SAN nodes (`san-a`, `san-b`) boot an unbaked Ubuntu cloud image** (D8, deferred when #108
-   was closed; still unbaked under #280, which only moves their OS version):
-   - no #275 box hygiene: apt timers plus the `site-dns.yml` dpkg-lock wait of up to ~10 min,
-     full cloud-init, snapd, dynamic MOTD;
-   - node-exporter and alloy are **downloaded from GitHub on every run**. [V]
-3. **san-b bypasses the SAN deb cache** (`_pcmk-dr-replication.yml`). [V]
+2. **SAN nodes (`san-a`, `san-b`) boot an unbaked Ubuntu cloud image** at develop before #280:
+   no #275 box hygiene (apt timers plus the `site-dns.yml` dpkg-lock wait of up to ~10 min, full
+   cloud-init, snapd, dynamic MOTD), and node-exporter and alloy are downloaded from GitHub on
+   every run [V].
+   **Delivered by epic #280 Task T6**: `bake-san.yml`, role `san` → box `san-<infra token>`, with
+   #275's hygiene roles, node-exporter and the alloy install half; it supersedes #108. **#288 only
+   verifies it** in W1 (SAN boot checks) and extends `fwupd-off` to it (W2).
+3. **san-b bypassed the SAN deb cache** (`_pcmk-dr-replication.yml`). **Moot after #280 T6**, which
+   retires the SAN deb cache entirely.
 4. **Every pcmk boot batch is `--no-parallel`** because nodes share a box (`_batch_shares_box`,
    phases.py). Full pcmk means 14 sequential boots. [I from code logic]
 5. **The qm-status probe may give a false positive:** `pcs status resources` likely exits 0 once
@@ -179,20 +183,11 @@ One issue each, all in #280's model:
 - **pcmk cluster packages baked** into the pcmk cluster-node role's box, with
   `update_cache: false` at run time (gap 1; open-iscsi too). The bake leaves pcsd / corosync /
   pacemaker disabled until cluster setup.
-- **san-b uses the SAN deb cache:** reuse the `iscsi-target` install path (gap 3).
+- **`mqlab status <stack> --check`:** the scriptable clean-run check (§1).
 - **App-client pymqi venv baked** into the **`mq-client` role** box, using #1227's install-half
   pattern (gap 8).
-- **A baked SAN box, as a new `versions.yaml` no-MQ role** (e.g. `san`) at the catalog's Ubuntu
-  version (gap 2):
-  - #275 hygiene roles;
-  - node-exporter and the alloy install half;
-  - drbd-utils, targetcli-fb, open-iscsi;
-  - `linux-modules-extra` handled as kernel-matched (like the RDQM kmod): a bake-time check that
-    fails loudly on a kernel mismatch, never at boot;
-  - san-a / san-b repointed to it;
-  - the `bake-dirs-guard` extended to it;
-  - verified on **both arches**.
-- **`fwupd-refresh` disabled** in the Ubuntu hygiene, for every Ubuntu box including SAN (gap 10).
+- **`fwupd-refresh` disabled** in the Ubuntu hygiene, for every Ubuntu box **including #280's
+  `san` box** (gap 10).
 - **pcmk qm-status probe: verify, then fix** (gap 5). Confirm on a live cluster whether
   `pcs status resources` exits 0 before `mq_group` exists. If it does, make the verb check
   `mq_group` `Started`. If it doesn't, close the item as not needed.
@@ -220,12 +215,10 @@ One issue each, all in #280's model:
 ## 5. Risks and lessons carried from #275
 
 - **Cross-arch box behaviour.** #1265 showed a bake path can differ per arch (snapd purge on x86
-  only). The SAN box, and any Ubuntu bake change, is verified on **both** arches before the
-  streaks.
+  only). Every Ubuntu bake change here (pcmk packages, mq-client venv, `fwupd-off` on every
+  Ubuntu box including `san`) is verified on **both** arches before the streaks.
 - **Huge pages on macOS for pcmk:** full is 30.25 GiB and `--no-dr` 24.25 GiB, against the Vergil
   VM's ~62 GiB. Check headroom with commons up; fail-loud already exists (#1241).
-- **The kernel-matched module** on the SAN box (linux-modules-extra) must match the guest kernel
-  at the catalog's Ubuntu version. Pin or assert at bake time.
 - **#280 interaction.** Everything here assumes #280's catalog and roles. If #280's final shape
   differs from its spec, the W2 box tasks are re-shaped at the start of this epic, not
   hand-patched.
@@ -242,5 +235,6 @@ One issue each, all in #280's model:
   completes.
 - Follow-on to logical-minds-foundry/.github#275 (its retrospective, #277, records this in §5).
 - Seeded from mq-resiliency-lab-for-linux#1264.
-- Reopens the SAN-box decision deferred when #108 was closed (D8), on #275's evidence.
+- The SAN-box decision deferred when #108 was closed (D8) is settled by **#280 Task T6** (the
+  baked `san` box, which supersedes #108). #288 verifies it and extends hygiene to it.
 - RHEL host constraint: #847.
