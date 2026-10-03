@@ -53,9 +53,12 @@ Developer edition, Ubuntu cloud images, RHEL DVD + kickstart.
   error vocabulary).
 - **`build/` paths** go only through `mqlab.paths` (`state()`, `work()`, `cache()`);
   never hard-code a `build/<X>` path.
-- **Infra OS** is `ubuntu:26` after Phase 2 (`ubuntu:24` during Phase 1). It covers
-  obs, infra-svc, infra-client, svc-sim, app-client, mon-probe, san-a and san-b, and
-  is never selectable.
+- **Shared-node OS** is never selectable, and splits by whether the node runs MQ
+  (spec §2, correction #285):
+  - `infra` (no MQ: obs, infra-svc, infra-client, san-a, san-b) is `ubuntu:26` after
+    Phase 2 (`ubuntu:24` during Phase 1).
+  - `infra_mq` (role `mq-client`: svc-sim, app-client, mon-probe) stays on the
+    IBM-listed Ubuntu (`ubuntu:24`) and is support-gated like a stack default.
 - **Support gate:** a stack's `default` must never point at an entry carrying
   `ibm_support.status: unsupported`.
 - **RDQM is RHEL 9 only.** RHEL on aarch64 stays refused.
@@ -107,7 +110,7 @@ Phase 1   T1 (catalog + resolver, pure)
 Phase 2   T8 (Ubuntu 26 entry, role fix-ups, infra→26)  [needs V1, T0a, T0b]
           D2 deploy: bake ubuntu26 boxes  [needs T8]
           V2 validate: both Ubuntu stacks @26 + @24-on-26-commons  [needs D2]
-          T9 flip Ubuntu stack defaults → 26 (if IBM-supported)  [needs V2]
+          T9 flip Ubuntu defaults + infra_mq → 26  [needs V2 + an SPCR 26.04 row]
 Phase 3   T10 (RHEL 10 entry, base box, vars, v3 gate)  [needs V1, T0a, T0b]
           D3 deploy: bake rhel/10 + mq-nativeha-rhel10  [needs T10; human stages RHEL 10 DVD]
           V3 validate: nativeha-rhel-crr@10  [needs D3]
@@ -899,9 +902,21 @@ Created with `--kind validation`, `--blocked-by D1`.
     filling in the version string T0b recorded.
   - If T0a cites IBM as not supporting MQ 10 on 26.04, add
     `ibm_support: { status: unsupported, source: <T0a URL> }`.
-  - Set `infra: ubuntu:26`.
+  - Set `infra: ubuntu:26`, and add `infra_mq: ubuntu:24` (#285).
   - Set `nativeha-ubuntu` and `pcmk-ubuntu` to `supported: [ubuntu:24, ubuntu:26]`,
-    and **keep `default: ubuntu:24`** (T9 flips it).
+    and **keep `default: ubuntu:24`** (T9 flips it once IBM lists 26.04).
+  - Per #1271, 26.04 carries
+    `ibm_support: { status: unsupported, source: <SPCR URL from os-version-support-matrix.md> }`.
+- Modify: `src/mqlab/versions.py` (#285).
+  - Add the `infra_mq` catalog key and resolve the MQ-bearing shared role
+    `mq-client` from it. `infra`, `obs` and `san` stay on `infra`. Concretely,
+    split `INFRA_ROLES` into non-MQ roles (from `infra`) and `INFRA_MQ_ROLES =
+    ("mq-client",)` (from `infra_mq`).
+  - `load_catalog` applies the support gate to `infra_mq` exactly as it does to
+    stack defaults; `infra` is not gated.
+  - `all_boxes` and `node_boxes` use the split.
+  - Tests: `test_mq_client_resolves_from_infra_mq`,
+    `test_infra_mq_refuses_ibm_unsupported`, and `test_infra_not_gated`.
 - Create: `ansible/roles/<role>/vars/Ubuntu-26.yml` for every role that T5 gave an
   `Ubuntu-24.yml`, with values from T0a/T0b (package-name changes, if any).
 - Modify: the bake playbooks and roles only where T0a/T0b found a 26.04 package or
@@ -942,8 +957,8 @@ def test_unsupported_selection_warns(capsys, catalog_26_unsupported):
 Created with `--kind deployment`, `--blocked-by T8`.
 
 - **Procedure:** On each host, run `mqlab box build --all`. This bakes `infra`,
-  `obs`, `mq-client` and `san` at ubuntu26, plus `mq-nativeha-ubuntu26` and
-  `pcmk-ubuntu26`.
+  `obs` and `san` at ubuntu26, plus `mq-nativeha-ubuntu26` and `pcmk-ubuntu26`.
+  `mq-client` stays at ubuntu24 under `infra_mq` (#285).
 - **Acceptance:** `mqlab box status` shows them all at REUSE.
 
 ### Operational V2 (validation): Ubuntu 26 rows
@@ -971,10 +986,17 @@ Created with `--kind validation`, `--blocked-by D2`.
 
 - [ ] **Step 1:** Write a failing test:
   `assert load_catalog().stack_os("nativeha-ubuntu", None, X86) == OsRef("ubuntu", 26)`.
-- [ ] **Step 2:** Flip the defaults. If T0a cited 26.04 as IBM-unsupported,
-  `load_catalog` refuses this, and that is the gate working. In that case, close T9
-  as **not done**, with a comment citing T0a and the support-gate rule (spec §4.1).
-  Don't merge a broken catalog.
+- [ ] **Step 2: Precondition (#285).** An "Ubuntu 26.04 LTS" row exists in the SPCR
+  for the pinned MQ 10.0.x release. Check it with the method recorded in
+  `docs/reference/os-version-support-matrix.md`. As of 2026-10-03 there is **no
+  such row** (10.0.0.5 still lists 24.04 only).
+  - Until the row appears, T9 stays **open and blocked**. Comment
+    `blocked: preconditions not met — no SPCR Ubuntu 26.04 row` and stop.
+  - When the row appears: remove 26.04's `ibm_support: unsupported` marker (cite the
+    SPCR row), flip both stack defaults **and** `infra_mq` to `ubuntu:26`, and run a
+    V2-style re-validation of the `mq-client` shared nodes on 26.
+  - Never flip around the gate: `load_catalog` refuses an unsupported default, and
+    that is the gate working.
 - [ ] **Step 3:** Run `vrg-container-run -- vrg-validate`, then commit:
   `vrg-commit --type feat --scope versions --message "Ubuntu stacks default to 26"`.
 

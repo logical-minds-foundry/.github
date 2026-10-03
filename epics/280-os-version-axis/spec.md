@@ -51,6 +51,11 @@ deliberately, not by default.
   boxes, whichever stack runs: `obs`, `infra-svc`, `infra-client`, `svc-sim`,
   `app-client` and `mon-probe`. The `pcmk-ubuntu` SAN targets (`san-a`, `san-b`)
   are also always Ubuntu.
+- **Some shared nodes run MQ** (correction, #285). `svc-sim` runs a queue manager
+  (SVCQM, the shared counterparty), and `app-client` and `mon-probe` run MQ client
+  software (the requester app, the client-mode exporters). They all boot the
+  MQ-commons box, which is role `mq-client` in this design. The other shared nodes
+  (`infra-svc`, `infra-client`, `obs`, and the SANs) run no MQ product.
 - **The MQ version is a single global pin.** `lab/mq-version` (`10.0.0.0`) is read
   by mqlab, Ansible, fetch scripts and the bake manifest hash. It is not
   selectable.
@@ -61,13 +66,21 @@ deliberately, not by default.
 
    | Stack | Supported | Default |
    |---|---|---|
-   | `nativeha-ubuntu` | ubuntu 24, 26 | ubuntu 26 |
-   | `pcmk-ubuntu` | ubuntu 24, 26 | ubuntu 26 |
+   | `nativeha-ubuntu` | ubuntu 24, 26 | ubuntu 24 until IBM lists 26.04, then 26 |
+   | `pcmk-ubuntu` | ubuntu 24, 26 | ubuntu 24 until IBM lists 26.04, then 26 |
    | `nativeha-rhel-crr` | rhel 9, 10 | rhel 10 |
    | `rdqm-rhel` | rhel 9 | rhel 9 (no RHEL 10 DRBD kmod) |
 
-2. Move every **shared/infra node** (commons plus the pcmk SANs) to **Ubuntu 26**,
-   with no version choice for them.
+   IBM MQ 10.0 lists Ubuntu 24.04 only; 26.04 has no row yet
+   (`docs/reference/os-version-support-matrix.md`, #1271). So the §4.1 support gate
+   keeps both Ubuntu defaults on 24 for now, and 26 is selectable as lab-only.
+
+2. Shared nodes are split by **whether they run MQ** (correction, #285), and
+   neither group offers a version choice:
+   - **No MQ** (`infra-svc`, `infra-client`, `obs`, `san-a`, `san-b`) → **Ubuntu 26**
+     now.
+   - **Runs MQ** (`svc-sim`, `app-client`, `mon-probe`; role `mq-client`) → stays on
+     the **IBM-listed Ubuntu** (24), and moves to 26 only when IBM lists 26.04.
 3. **Stack identity stays version-free.** A stack name says *what* is built; the
    OS version is configuration of that build.
 4. Version tokens appear only in the catalog (`lab/versions.yaml`) and in
@@ -105,10 +118,11 @@ os:
     9:  { point: "9.6", iso: rhel-9.6-x86_64-dvd.iso }
     10: { point: "<pinned by S2>", iso: "rhel-<point>-x86_64-dvd.iso",
           requires: [x86-64-v3] }
-infra: ubuntu:26            # commons + pcmk SANs; not selectable
+infra: ubuntu:26            # shared nodes WITHOUT MQ + pcmk SANs; not selectable
+infra_mq: ubuntu:24         # shared nodes WITH MQ (role mq-client); support-gated
 stacks:
-  nativeha-ubuntu:   { supported: [ubuntu:24, ubuntu:26], default: ubuntu:26 }
-  pcmk-ubuntu:       { supported: [ubuntu:24, ubuntu:26], default: ubuntu:26 }
+  nativeha-ubuntu:   { supported: [ubuntu:24, ubuntu:26], default: ubuntu:24 }
+  pcmk-ubuntu:       { supported: [ubuntu:24, ubuntu:26], default: ubuntu:24 }
   nativeha-rhel-crr: { supported: [rhel:9, rhel:10],      default: rhel:10 }
   rdqm-rhel:         { supported: [rhel:9],               default: rhel:9 }
 ```
@@ -119,7 +133,19 @@ stacks:
   `ibm_support: { status: unsupported, source: <url> }`. Such a version is
   selectable as lab-only, and the resolver prints a warning. **A stack's default
   never points at an IBM-unsupported version.** The rule is to gate the default
-  flip, not the support (decided in the brainstorm).
+  flip, not the support (decided in the brainstorm). **The same gate applies to
+  `infra_mq`**: shared nodes that run MQ never default to an IBM-unsupported
+  version (correction, #285). `infra` (no MQ) is not gated.
+- **What counts as IBM-supported.** A version is supported for the gate only when
+  IBM's SPCR (Software Product Compatibility Report) for the pinned MQ 10.0.x
+  release has a row for it, e.g. "Ubuntu 26.04 LTS". The checkable method is
+  recorded in `docs/reference/os-version-support-matrix.md`. Moving the Ubuntu
+  defaults (T9) and moving `infra_mq` to 26 each wait for that row.
+- **ARM64 scope note.** IBM ships MQ on Linux ARM64 only as the Developer edition
+  ("not suitable for production use … no formal IBM support"), so the SPCR has no
+  ARM64 rows. The gate is evaluated against the x86-64 rows. Lab results on arm64
+  are representative but unsupported, and findings that depend on production
+  support must be confirmed on x86-64.
 - The unused `alma9-x86_64` registry entry is dropped in the move.
 
 ### 4.2 The build file
@@ -153,7 +179,8 @@ It is the **version layer in front of it**:
    each node it works out the role, the OS major and the concrete box name and pin:
    - From the owning stack's instance record when one exists.
    - Otherwise from the stack's default.
-   - For shared nodes, from `infra`.
+   - For shared nodes, from `infra`; for shared nodes that run MQ (role
+     `mq-client`), from `infra_mq` (#285).
 2. `platforms.resolve` takes that per-node box selection as input instead of a
    `platform:` key. It keeps sole ownership of the provider mechanics.
 3. The rendered file carries the box-version pin per node. `box-versions.json` and
@@ -167,7 +194,8 @@ next to `pcmk-ubuntu` on 26.
 Given **stack + optional build file + host arch**, the version layer produces a
 **resolved spec** containing:
 
-- Each node's concrete box name. Shared nodes resolve against `infra`.
+- Each node's concrete box name. Shared nodes resolve against `infra`, and the
+  MQ-bearing `mq-client` role against `infra_mq`.
 - The per-version facts the bake and provisioning steps need: base box and
   version pin, RHEL point release and ISO.
 
@@ -314,7 +342,7 @@ The SAN path is a first-class demonstration arm, not a secondary concern.
 |---|---|---|
 | **0: Spikes** | **S1** `cloud-image/ubuntu-26.04` libvirt boxes exist (amd64 + arm64) and boot under our Vagrant. **S2** IBM's support statement for MQ 10 (server + Native HA) on Ubuntu 26.04 and RHEL 10, fetched via `tools/ibm_doc_cache.py`, cited, with data kept apart from judgment; plus availability of Pacemaker, DRBD and `fence-agents-virsh` on 26.04. Pins the RHEL 10 point release. **S3** lab host KVM exposes x86-64-v3 to guests. | Recorded findings; go/no-go per family |
 | **1: Resolver refactor** | Catalog, build file, resolver, instance record, role-based topology, renames, version-free playbooks, vars indirection, `box gc` migration, version-token guardrail, all at **today's versions** (ubuntu24/rhel9). No behavior change, with one deliberate exception: the SAN targets move from cached debs to the baked `san` box (§4.7.1), first as `san-ubuntu24`, so the pcmk-ubuntu regression rebuild proves it before the re-pin to 26. | Cold rebuild of every stack |
-| **2: Ubuntu 26** | Catalog entry and role fix-ups; shared nodes and SANs move to 26; both Ubuntu stacks build on 24 and 26; default flips to 26 (subject to §4.1 gate). | Validation rows below |
+| **2: Ubuntu 26** | Catalog entry and role fix-ups; shared nodes **without MQ** and the SANs move to 26 (`infra`); `mq-client` stays on 24 (`infra_mq`); both Ubuntu stacks build on 24 and 26; the default flip and the `infra_mq` move wait for an SPCR 26.04 row (§4.1). | Validation rows below |
 | **3: RHEL 10** | RHEL 10 base box, per-major vars; `nativeha-rhel-crr` builds on 9 and 10; default flips to 10 (subject to §4.1 gate). `rdqm-rhel` stays on 9. | Validation rows below |
 
 If a spike returns **no** for a family, that family's phase pauses with the
@@ -337,8 +365,9 @@ DR bring-up plus the existing end-to-end check, **with a human dashboard review*
 The Phase 1 regression rebuild covers the 24 and 9 rows. The 26 and 10 rows run
 after Phases 2 and 3, and they also prove that the shared nodes work on Ubuntu 26.
 
-**Mixed-version re-validation.** After the shared nodes and SANs move to 26, a
-default 24 build always runs against 26 shared nodes. So each Ubuntu stack is
+**Mixed-version re-validation.** After the non-MQ shared nodes and SANs move to
+26, a default 24 build always runs against 26 shared nodes (the `mq-client` nodes
+stay on 24 under `infra_mq`). So each Ubuntu stack is
 re-validated at 24 against the 26 shared nodes. `pcmk-ubuntu` at 24 matters most:
 its cluster nodes on 24 are iSCSI initiators to DRBD-backed SAN targets on 26.
 Additionally:
