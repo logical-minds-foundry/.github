@@ -5,6 +5,7 @@
 **Goal:** Bring `pcmk-ubuntu`, `rdqm-rhel` and `nativeha-rhel-crr` to epic #275's cold-bootstrap bar. Measure first with the existing perf instrumentation, fix by data one change per issue, and prove it with 5-run streaks per stack and platform.
 
 **Architecture:** Mostly box-bake and provision changes in Ansible, plus one small CLI addition (`mqlab status --check`), framed in epic #280's role/catalog model. Operational tasks carry the measurement:
+
 - **W1** baselines and the **W4** streaks run on macOS (maintainer's host) and x86 cloud (cloud-agent validation tickets);
 - two human checkpoints set targets and gate the **W3** data-driven items.
 
@@ -51,7 +52,7 @@ Inputs and conditions the spec implies that no unit test exercises; each is pinn
 
 ## Task dependency graph
 
-```
+```text
 #280 complete
   ├─ V1a pcmk-ubuntu macOS baseline ─┐
   ├─ V1b pcmk-ubuntu cloud baseline  ├─► C1 baseline review (maintainer) ─► W3: T5, T6, T7(+V7), T8?, T9?
@@ -81,6 +82,7 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
 | V1d | `nativeha-rhel-crr --no-dr` | x86 cloud | #280 default (expected `rhel:10`) | cloud agent |
 
 **Every ticket's procedure** (#1267's format):
+
 1. **Preconditions:**
    - commit pinned;
    - boxes rebaked to REUSE **outside** the timed run (record bake times);
@@ -95,7 +97,8 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
    - **V1a/V1b:** SAN boot checks on `san-a` (`systemd-analyze`, `systemd-analyze blame | head`, `snap list`, `systemctl is-enabled cloud-config cloud-final apt-daily.timer fwupd-refresh.timer`), to confirm #280 T6's baked SAN box carries #275's hygiene.
    - **V1b, pcmk probe verification for T10:** after `provision` completes, run `pcs resource disable mq_group --wait`, then `pcs status resources; echo rc=$?`, then `pcs resource enable mq_group --wait`. Record whether `pcs status resources` exits 0 with `mq_group` stopped. This is read-mostly and restores the group.
    - **V1c/V1d, RHEL live hygiene probe** on one MQ node, read-only:
-     ```
+
+     ```text
      systemctl list-unit-files --state=enabled
      systemctl list-timers --all
      rpm -q subscription-manager insights-client cloud-init kexec-tools dnf-automatic fwupd
@@ -103,6 +106,7 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
      cat /proc/cmdline
      systemd-analyze; systemd-analyze blame | head -15
      ```
+
 6. **Result:** `Outcome: SUCCESS` means the run completed and the data was posted (a failing bootstrap that produces a perf report is still a SUCCESSful *measurement*: record the failure and file a fix).
 
 ### Checkpoint C1: Baseline review (maintainer, recorded as an epic comment)
@@ -119,10 +123,12 @@ One validation ticket per row, created with `vrg-issue-create --kind validation`
 ### Task 1: `mqlab status <stack> --check` (scriptable clean-run check)
 
 **Files:**
+
 - Modify: `src/mqlab/cli.py`, the `status` command: add `--check`.
 - Test: `tests/test_cli_status.py`.
 
 **Interfaces:**
+
 - Consumes: the existing `_probe_all(deps, stack) -> dict` and `build_states` / `first_unsatisfied(stack, states)` used by bootstrap, plus each stack's `qm-status` verb. Bootstrap's observe probe only checks Prometheus targets, so `--check` adds a separate **obs health probe** (new).
 - Produces:
   - `_probe_obs_health(deps) -> list[str]`, returning the names of failed obs checks (empty = healthy). Over the existing ssh-to-obs path, read-only: `systemctl is-active` for each obs unit (`opensearch`, `opensearch-dashboards`, `data-prepper`, `loki`, `prometheus`, `grafana-server`, `alloy`) and `curl -fsS localhost:9200/_cluster/health`, requiring `status == "green"`.
@@ -174,12 +180,14 @@ def test_status_check_requires_stack_name(runner):
 ### Task 2: Bake the pcmk cluster packages; no per-run apt refresh
 
 **Files:**
+
 - Modify: `ansible/bake-pcmk-ubuntu.yml`. Add an install play (before the final hygiene/guard plays) for `pacemaker`, `corosync`, `pcs`, `resource-agents-base`, `resource-agents-extra`, `fence-agents-virsh` and `open-iscsi`, then disable and stop `pcsd`, `corosync` and `pacemaker` at bake.
 - Modify: `ansible/roles/pcmk-cluster/tasks/install-Debian.yml`, `ansible/roles/pcmk-stonith/tasks/install-Debian.yml` and `ansible/roles/iscsi-initiator/tasks/install-Debian.yml`. Use `update_cache: false` and `state: present`, behind a `package_facts` skip-if-installed guard. Keep an install path for old boxes (Review Focus 3).
 - Modify: `docs/development/box-bake-manifest.md` (the `pcmk` role rows).
 - Test: `tests/test_pcmk_baked.py` (new).
 
 **Interfaces:**
+
 - Consumes: #280's `pcmk` role (box `pcmk-<os><major>`, bake stem `pcmk-ubuntu`).
 - Produces: no new names. Flips the `pcmk-*` boxes' manifest hash.
 
@@ -236,6 +244,7 @@ def test_per_run_installs_still_install_on_old_boxes():
 ### Task 3: Bake the app-client pymqi venv into the `mq-client` role
 
 **Files:**
+
 - Create: `ansible/roles/mq-client/tasks/install.yml` with the venv creation (`creates:` guard), `pip install pymqi` (`state: present`) and an `import pymqi` check. Follow #1227's `mq-inter-qm/tasks/install.yml` pattern, including the `/opt/mqm/inc/cmqc.h` precondition.
 - Modify: `ansible/roles/mq-client/tasks/main.yml` to `import_tasks: install.yml` instead of the inline venv/pip tasks.
 - Modify: `ansible/roles/mq-client/defaults/main.yml`: `mq_client_venv: /home/vagrant/mqvenv` (the single definition).
@@ -245,6 +254,7 @@ def test_per_run_installs_still_install_on_old_boxes():
 - Test: `tests/test_mq_client_venv_baked.py` (new).
 
 **Interfaces:**
+
 - Consumes: #280's `mq-client` role (box `mq-client-<os><major>`).
 - Produces: the variable `mq_client_venv`. Flips the `mq-client-*` hash.
 
@@ -276,12 +286,14 @@ def test_per_run_install_is_noop_safe_and_old_box_safe():
 ### Task 4: `fwupd-off` in every Ubuntu bake (including `san`)
 
 **Files:**
+
 - Create: `ansible/roles/fwupd-off/tasks/main.yml`. Mask `fwupd-refresh.timer`, `fwupd-refresh.service` and `fwupd.service`, skipping units that are absent (`systemctl list-unit-files`). Assert they're masked, failing the bake otherwise.
 - Modify: every Ubuntu bake playbook: `bake-obs.yml`, `bake-infra.yml`, `bake-mq-ubuntu.yml`, `bake-nativeha-ubuntu.yml`, `bake-pcmk-ubuntu.yml`, and **`bake-san.yml` (#280 T6)**. Include the role in the same play as `cloud-init-trim`/`snapd-off` (the second-to-last play), keeping `bake-dirs-guard` last.
 - Modify: `docs/development/box-model.md` and `box-bake-manifest.md`.
 - Test: `tests/test_fwupd_baked_off.py` (new).
 
 **Interfaces:**
+
 - Consumes: the list of Ubuntu bakes. Derive it the same way `tests/test_apt_autoupdate_baked_off.py` does, so `bake-san.yml` is included automatically.
 - Produces: no names. Flips every Ubuntu box hash; RHEL is unchanged.
 
@@ -315,6 +327,7 @@ def test_role_masks_and_asserts():
 **Blocked-by:** V1b (its probe-verification record).
 
 **Files:**
+
 - Modify: `lab/topology.yaml`, `stacks.pcmk-ubuntu.verbs.qm-status`.
 - Test: `tests/test_cli_bootstrap.py` / `tests/test_cli_status.py` (pcmk status shape).
 
@@ -332,6 +345,7 @@ def test_role_masks_and_asserts():
 **Blocked-by:** V1c, V1d, and C1's go decision.
 
 **Files:**
+
 - Create: `ansible/roles/rhel-hygiene/tasks/main.yml`:
   - mask the listed units **if present** (`rhel_hygiene_mask_units`);
   - set `enabled=0` in the listed dnf plugin confs if present (`rhel_hygiene_disable_dnf_plugins`);
@@ -375,6 +389,7 @@ def test_role_is_version_agnostic():
 **Blocked-by:** C1.
 
 **Files:**
+
 - Modify: the per-run `acl` / `libicu` dnf tasks in `ansible/_rdqm-cluster-ha.yml`, `ansible/_rdqm-dr-replication.yml`, `ansible/_nativeha-cluster-ha.yml`, `ansible/_nativeha-dr-replication.yml`, `ansible/roles/mq-nativeha/tasks/install-RedHat.yml`, `ansible/roles/mq-nativeha/tasks/tls.yml` and `ansible/roles/node-exporter/tasks/main.yml`. Put each behind one `package_facts` + `when: "'<pkg>' not in ansible_facts.packages"`.
 - Test: `tests/test_rhel_dnf_noops.py` (new).
 
@@ -387,6 +402,7 @@ def test_role_is_version_agnostic():
 **Blocked-by:** C1.
 
 **Files:**
+
 - Modify: `ansible/ansible.cfg` `[defaults]`: `forks = 20`, with a comment citing this task and #590 (the SSH timeouts stay).
 - Test: `tests/test_ansible_cfg.py`. It parses `ansible.cfg`; `forks` is an integer ≥ 10, and `timeout`/`ConnectTimeout` are unchanged.
 
@@ -403,6 +419,7 @@ def test_role_is_version_agnostic():
 ### Task 8 (conditional): pcmk boot-batch parallelism
 
 **Blocked-by:** C1. **Only if** V1a/V1b show `vms` ≥ 40% of pcmk wall-clock.
+
 - Hypothesis: `_batch_shares_box` (`src/mqlab/phases.py`) serialises same-box batches because of a box-volume staging race (#859). With #1248's REUSE registration, the base volume already exists after the first boot.
 - Change: allow parallel `vagrant up` for a same-box batch when every guest's box base volume already exists in the pool (checked via `virsh vol-list`).
 - Tests cover both branches. A measured keep/revert run follows, as for V7.
@@ -410,6 +427,7 @@ def test_role_is_version_agnostic():
 ### Task 9 (conditional): Stack-specific milestones
 
 **Blocked-by:** C1. **Only if** C1 finds `profile_tasks` insufficient.
+
 - Extend the readiness-task milestone map in `src/mqlab/perfrun.py` with:
   - `drbd_connected`: the DRBD connect wait task;
   - `pcs_cluster_online`: `pcmk-cluster : wait for all nodes online`;
@@ -432,7 +450,7 @@ def test_role_is_version_agnostic():
 | V4c | `rdqm-rhel --no-dr` | x86 cloud | `rhel:9` |
 | V4d | `nativeha-rhel-crr --no-dr` | x86 cloud | #280 default |
 
-- **Pinned:** the develop SHA after the last W2/W3 merge, with "UNBLOCKED @ <sha>" posted when it's known.
+- **Pinned:** the develop SHA after the last W2/W3 merge, with "UNBLOCKED @ &lt;sha&gt;" posted when it's known.
 - **Boxes:** rebaked outside the timed runs (record times). Every changed box is verified on both arches **before** its streak (#1265 lesson).
 - **Run 1 = Checkpoint C2:** its wall-clock × 1.20, rounded up to the minute and capped at 1200 s, is the **target**, recorded in the ticket before run 2.
 - **Per run:** exit, wall-clock, every phase, the milestones, `uv run mqlab status <stack> --check` (Task 1) exit code, and iowait.

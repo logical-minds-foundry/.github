@@ -24,6 +24,7 @@ That evidence covers **one stack**. The lab has four:
 
 A desk audit (#1264, findings in its comments) confirmed that most of #275 is stack-agnostic or
 lives on the shared nodes:
+
 - the perf instrumentation and env auto-detect;
 - every obs/infra/mq-commons box fix;
 - the pre-flight short-circuit, box reuse, huge pages and the SSD boot disk.
@@ -39,6 +40,7 @@ can't be brought up in a timely, reliable way won't be used.
 **This epic is planned and implemented as if logical-minds-foundry/.github#280 is complete.** It
 starts immediately after #280 finishes (the maintainer's sequencing). #280 changes several things
 this epic builds on:
+
 - it introduces `lab/versions.yaml` (the OS catalog) and role-based boxes with a single box→base
   mapping;
 - it moves no-MQ shared nodes, **including the SAN targets**, to the catalog's Ubuntu (26);
@@ -109,6 +111,7 @@ needed, with one gap: today's milestones are generic (`boot:<vm>` plus the obs r
 Per-stack bring-up steps show up only in the Ansible `profile_tasks` timings in the run log.
 Adding milestones for the stack-specific steps is optional (W3 item, §4) and should be done only
 if reading `profile_tasks` proves insufficient:
+
 - DRBD connect / initial sync;
 - pcs cluster formation (`pcmk-cluster : wait for all nodes online`);
 - `rdqm-qm-create`;
@@ -122,46 +125,48 @@ so tool time limits can't kill them.
 
 **[V]** = verified in code; **[I]** = inferred, to confirm.
 
-**pcmk-ubuntu**
-1. **Cluster packages installed from the network on every run** on 6 nodes: pacemaker, corosync,
-   pcs, resource-agents, fence-agents-virsh, with `update_cache: true`. See
-   `roles/pcmk-cluster/tasks/install-Debian.yml`, `roles/pcmk-stonith/tasks/install-Debian.yml`;
-   `roles/iscsi-initiator/tasks/install-Debian.yml` forces an apt update. [V]
-2. **SAN nodes (`san-a`, `san-b`) boot an unbaked Ubuntu cloud image** at develop before #280:
-   no #275 box hygiene (apt timers plus the `site-dns.yml` dpkg-lock wait of up to ~10 min, full
-   cloud-init, snapd, dynamic MOTD), and node-exporter and alloy are downloaded from GitHub on
-   every run [V].
-   **Delivered by epic #280 Task T6**: `bake-san.yml`, role `san` → box `san-<infra token>`, with
-   #275's hygiene roles, node-exporter and the alloy install half; it supersedes #108. **#288 only
-   verifies it** in W1 (SAN boot checks) and extends `fwupd-off` to it (W2).
-3. **san-b bypassed the SAN deb cache** (`_pcmk-dr-replication.yml`). **Moot after #280 T6**, which
-   retires the SAN deb cache entirely.
-4. **Every pcmk boot batch is `--no-parallel`** because nodes share a box (`_batch_shares_box`,
-   phases.py). Full pcmk means 14 sequential boots. [I from code logic]
-5. **The qm-status probe may give a false positive:** `pcs status resources` likely exits 0 once
-   the cluster is up but before `mq_group` exists. [I]
+### pcmk-ubuntu
 
-**RHEL (`rdqm-rhel` on 9, `nativeha-rhel-crr` on its #280 default)**
+- **Gap 1.** **Cluster packages installed from the network on every run** on 6 nodes: pacemaker, corosync,
+  pcs, resource-agents, fence-agents-virsh, with `update_cache: true`. See
+  `roles/pcmk-cluster/tasks/install-Debian.yml`, `roles/pcmk-stonith/tasks/install-Debian.yml`;
+  `roles/iscsi-initiator/tasks/install-Debian.yml` forces an apt update. [V]
+- **Gap 2.** **SAN nodes (`san-a`, `san-b`) boot an unbaked Ubuntu cloud image** at develop before #280:
+  no #275 box hygiene (apt timers plus the `site-dns.yml` dpkg-lock wait of up to ~10 min, full
+  cloud-init, snapd, dynamic MOTD), and node-exporter and alloy are downloaded from GitHub on
+  every run [V].
+  **Delivered by epic #280 Task T6**: `bake-san.yml`, role `san` → box `san-<infra token>`, with
+  #275's hygiene roles, node-exporter and the alloy install half; it supersedes #108. **#288 only
+  verifies it** in W1 (SAN boot checks) and extends `fwupd-off` to it (W2).
+- **Gap 3.** **san-b bypassed the SAN deb cache** (`_pcmk-dr-replication.yml`). **Moot after #280 T6**, which
+  retires the SAN deb cache entirely.
+- **Gap 4.** **Every pcmk boot batch is `--no-parallel`** because nodes share a box (`_batch_shares_box`,
+  phases.py). Full pcmk means 14 sequential boots. [I from code logic]
+- **Gap 5.** **The qm-status probe may give a false positive:** `pcs status resources` likely exits 0 once
+  the cluster is up but before `mq_group` exists. [I]
 
-6. **No box hygiene.** Nothing is disabled in the RHEL kickstart or bakes [V]. Likely present:
-   `dnf-makecache.timer`, rhsmcertd plus the subscription-manager / product-id dnf plugins,
-   insights-client timers / motd hook, and kdump [I]. Confirm with a live probe **per RHEL major**.
-7. **1–3 redundant no-op `dnf` calls per RHEL node** (acl, libicu), each loading metadata. [V/I]
+### RHEL (`rdqm-rhel` on 9, `nativeha-rhel-crr` on its #280 default)
 
-**Every stack**
+- **Gap 6.** **No box hygiene.** Nothing is disabled in the RHEL kickstart or bakes [V]. Likely present:
+  `dnf-makecache.timer`, rhsmcertd plus the subscription-manager / product-id dnf plugins,
+  insights-client timers / motd hook, and kdump [I]. Confirm with a live probe **per RHEL major**.
+- **Gap 7.** **1–3 redundant no-op `dnf` calls per RHEL node** (acl, libicu), each loading metadata. [V/I]
 
-8. **The app-client pymqi venv is built on every cold run** (`roles/mq-client`,
-   `site-distributed-shared.yml`). #1227 baked only svc-sim's responder venv. [V]
+### Every stack
 
-**Lab-wide**
+- **Gap 8.** **The app-client pymqi venv is built on every cold run** (`roles/mq-client`,
+  `site-distributed-shared.yml`). #1227 baked only svc-sim's responder venv. [V]
 
-9. **Ansible `forks` is at the default of 5**, so plays over 8+ hosts run in waves. [V]
-10. **`fwupd-refresh.service`** is now obs's slowest boot unit on cloud (3.1 s, from #1267's boot
+### Lab-wide
+
+- **Gap 9.** **Ansible `forks` is at the default of 5**, so plays over 8+ hosts run in waves. [V]
+- **Gap 10.** **`fwupd-refresh.service`** is now obs's slowest boot unit on cloud (3.1 s, from #1267's boot
     checks). The firmware refresher is pointless on throwaway guests. [V]
 
 ## 4. Workstreams
 
-**W1, baseline (operational, on post-#280 develop, running in parallel with W2)**
+### W1, baseline (operational, on post-#280 develop, running in parallel with W2)
+
 - One instrumented cold `--no-dr` run per stack and platform at a **pinned commit, before any W2
   change**, each at its explicit OS version:
   - `pcmk-ubuntu` on macOS (maintainer's host, check in after the run);
@@ -177,9 +182,10 @@ so tool time limits can't kill them.
   - set the provisional target (§1);
   - decide which W3 items proceed.
 
-**W2, known wins (code, independent of W1)**
+### W2, known wins (code, independent of W1)
 
 One issue each, all in #280's model:
+
 - **pcmk cluster packages baked** into the pcmk cluster-node role's box, with
   `update_cache: false` at run time (gap 1; open-iscsi too). The bake leaves pcsd / corosync /
   pacemaker disabled until cluster setup.
@@ -192,7 +198,8 @@ One issue each, all in #280's model:
   `pcs status resources` exits 0 before `mq_group` exists. If it does, make the verb check
   `mq_group` `Started`. If it doesn't, close the item as not needed.
 
-**W3, data-gated (each blocked by the W1 review)**
+### W3, data-gated (each blocked by the W1 review)
+
 - **`rhel-hygiene` role**, version-agnostic, applied to **every RHEL major's** bake and shaped by
   each major's live probe (gap 6). For example: mask `dnf-makecache.*`, rhsmcertd and the insights
   timers; `enabled=0` for the subscription-manager / product-id dnf plugins; kdump off (in **each
@@ -204,7 +211,8 @@ One issue each, all in #280's model:
   (§2).
 - **Any new bottleneck the baseline names**, as its own issue.
 
-**W4, acceptance (operational)**
+### W4, acceptance (operational)
+
 - **Pre-streak checkpoint**, then the four streaks (§1) at the post-W2/W3 develop SHA:
   - cloud ones as validation tickets (#1267's format: SSD precondition, box rebake outside the
     timed run, `MQLAB_ENV` unset, explicit OS version, per-run table with the §1 clean checks,
