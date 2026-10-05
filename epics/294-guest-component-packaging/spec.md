@@ -274,7 +274,10 @@ components/<name>/
   pyproject.toml   name = <name>, own version, requires-python = "==3.14.*",
                    hatchling backend, [project.scripts] entry points,
                    own [tool.ruff] / [tool.pytest] config
-  uv.lock          this component's lock only
+  uv.lock          this component's lock only (incl. an optional `sdist-build`
+                   dependency group: the build requirements of any sdist
+                   dependency, e.g. setuptools + wheel for pymqi; packaging
+                   metadata about the component's own deps, not lab knowledge)
   src/<import_pkg>/
   tests/
   systemd/         static unit files (no templating)
@@ -334,9 +337,14 @@ Runs on the dev VM. It is the **only** producer of installable artifacts.
    install`.
 3. In `components/<name>/`, run `uv lock --check`. A stale lock refuses the
    build.
-4. Run `uv run --frozen --python <cached pinned interpreter> pytest`, with no
-   extras, so the clients' `mqi` extra (pymqi) is not installed on the dev VM
-   (§5.5). Any failure refuses the build.
+4. Run the tests in a **build-owned venv**:
+   `UV_PROJECT_ENVIRONMENT=$(mqlab build path work)/components/<name>/venv`,
+   recreated from the cached pinned interpreter on every build. Before pytest,
+   **assert** that venv's `pyvenv.cfg` `home` is the cached interpreter's `bin`
+   directory and its `version` is the pinned version. The developer's own
+   `components/<name>/.venv` is never used. Then run `uv run --frozen --python
+   <cached pinned interpreter> pytest` with no extras, so the clients' `mqi` extra
+   (pymqi) is not installed on the dev VM (§5.5). Any failure refuses the build.
 5. Build the component wheel: `uv build --wheel`, a standard PEP 517 build from
    the source tree that yields a pure-Python `py3-none-any` wheel. This is the
    artifact M2 later packages.
@@ -348,8 +356,10 @@ Runs on the dev VM. It is the **only** producer of installable artifacts.
      requirements of any **sdist** dependency. For pymqi that is `setuptools`
      and `wheel`. pymqi has no `[build-system]` table, and its `setup.py`
      imports `distutils` (removed from the stdlib in 3.12), which only resolves
-     through setuptools' shim. `uv export` never emits build requirements, so
-     the build stages them explicitly;
+     through setuptools' shim. `uv export` never emits build requirements
+     unprompted, so the component declares them in a `sdist-build` dependency
+     group (§5.4), which the build exports with `uv export --only-group
+     sdist-build`;
    - `deps/`: every locked dependency artifact (sdists included), so installs
      never reach PyPI and offline RHEL works;
    - `BUILD.json`: name, version, git tree hash, commit sha, runtime pin and
@@ -391,6 +401,10 @@ its sha256 against the pin, and is idempotent.
 
 ### 5.8 Bake and the dev loop
 
+- **Which boxes bake which components** is declared in the catalog, as
+  `roles.<role>.components` in `lab/versions.yaml`: `pcmk`, `san`,
+  `mq-nativeha` and `mq-rdqm` → `mq-resiliency-observability`; `mq-client` →
+  `mq-resiliency-clients`.
 - **Baked:** the interpreter, each component's dependencies (including the
   pymqi compile) and the component itself, at the artifact matching the
   component's **current git tree hash**. A cold provision needs nothing else.
@@ -410,8 +424,12 @@ its sha256 against the pin, and is idempotent.
 - **Dev loop:** `mqlab component install <name> --host …` reruns the same
   recipe against a running lab and picks up new code in seconds. In M3 this
   operation becomes `apt install`/`dnf upgrade` of a newer package version.
-- The clients' build toolchain (`gcc`, headers) is needed only in the bake.
-  Whether to remove it afterwards is a box-hygiene choice for the plan.
+- **The clients' compiler stays on the mq-client box.** `mqlab component install
+  mq-resiliency-clients` recompiles pymqi on the guest, so `gcc` (plus the MQ
+  SDK) must be on the **running** box, not just during the bake. The distro
+  `python3-venv`/`python3-dev` packages are dropped, because the pinned runtime
+  ships its own headers. Our own binary wheels (`.github#298`) would remove the
+  compiler requirement.
 
 ## 6. Testing and guards
 
@@ -455,9 +473,9 @@ Every implementation task lands in `mq-resiliency-lab-for-linux`.
 | T3 | Boundary foundations: `components/`, the `runtime:` pin in `lab/versions.yaml`, root ruff `extend-exclude`, `.ansible-lint.yml` `exclude_paths`, the boundary test, and a developer doc for the component contract | impl | T2 |
 | T4 | `mqlab component build` + `status` | impl | T3 |
 | T5 | `runtime-install` + `component-install` roles + `mqlab component install` | impl | T4 |
-| T6 | Carve out `mq-resiliency-observability`; delete the `src/mqlab` copies | impl | T3 |
+| T6 | Carve out `mq-resiliency-observability`; delete the `src/mqlab` copies | impl | T3, T4 |
 | T7 | Rewire the collector roles (`cluster-state`, `nativeha-state`, `rdqm-state`) and their bake plays | impl | T5, T6 |
-| T8 | Carve out `mq-resiliency-clients` (including `dr.*`, `header`, a `svc_responder` test) | impl | T3 |
+| T8 | Carve out `mq-resiliency-clients` (including `dr.*`, `header`, a `svc_responder` test) | impl | T3, T4 |
 | T9 | Rewire the client roles and playbooks (`mq-client`, `app-requester`, `bench-client`, `mq-inter-qm`, the authz/DLQ validate plays, `dr-run.sh`); remove the mqvenv/rvenv creation | impl | T5, T8 |
 | V1 | Cold rebuild, Ubuntu stacks (pcmk-ubuntu, nativeha-ubuntu), local arm64 host | validation | T7, T9 |
 | V2 | Cold rebuild, RHEL stacks (rdqm, nha-rhel-crr), x86 cloud host | validation | T7, T9 |
@@ -466,8 +484,9 @@ Every implementation task lands in `mq-resiliency-lab-for-linux`.
 | — | Follow-on brainstorm: our own binary wheels, pymqi first (`.github#298`) | bookend | V1, V2 |
 | — | Retrospective (`.github#297`) | terminal bookend | all |
 
-After T3 there are two parallel tracks: T4 → T5 (machinery) and T6/T8
-(carve-outs).
+After T4 there are two parallel tracks: T5 (install and box-builder machinery)
+and T6/T8 (carve-outs). The carve-outs wait for T4 so they pass the real build
+gate (`mqlab component build`) before merging.
 
 **T6 through T9 are one chain, validated as a unit.** T6 deletes the
 `src/mqlab` collector copies and T8 moves `clients/`, while the roles still

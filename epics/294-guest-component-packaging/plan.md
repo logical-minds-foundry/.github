@@ -101,11 +101,11 @@ read both.
 T1  docs: spec + plan (.github#295)
 T2  spike: runtime feasibility (report)                      [T1]
 T3  boundary foundations + runtime pin + roles.components    [T2]
- ├─► T4  mqlab component build + status                      [T3]
- │     └─► T5  runtime-install + component-install roles,
- │             mqlab component install, box-builder wiring   [T4]
- ├─► T6  carve mq-resiliency-observability                   [T3]   ─┐
- └─► T8  carve mq-resiliency-clients                         [T3]    │ chain
+ └─► T4  mqlab component build + status                      [T3]
+       ├─► T5  runtime-install + component-install roles,
+       │       mqlab component install, box-builder wiring   [T4]
+       ├─► T6  carve mq-resiliency-observability             [T3,T4] ─┐
+       └─► T8  carve mq-resiliency-clients                   [T3,T4]  │ chain
         T7  rewire collector roles + bakes                   [T5,T6] │ (develop may not
         T9  rewire client roles, playbooks, dr-run.sh        [T5,T8] ─┘  provision T6..T9)
 V1  validate: cold rebuild, Ubuntu stacks (arm64 local)      [T7,T9]
@@ -338,7 +338,8 @@ is revised before T3 (spec §11). There is no workaround by fallback.
 
 - Consumes: `RuntimePin`, `load_catalog()` (T3); `mqlab.paths.cache`, `repo_root`;
   `mqlab.runner.Command`, `SubprocessRunner`.
-- Produces:
+- Produces (also `test_venv_dir(name) -> Path` = `paths.work("components", name, "venv")`,
+  the build-owned test venv):
 
   ```python
   # src/mqlab/runtime.py
@@ -389,12 +390,24 @@ is revised before T3 (spec §11). There is no workaround by fallback.
     1. `git rev-parse HEAD:components/demo`
     2. `git status --porcelain -- components/demo`
     3. `uv --directory components/demo lock --check`
-    4. `uv --directory components/demo run --frozen --python <interp> pytest`
+    4. `uv --directory components/demo run --frozen --python <interp> pytest`, with
+       `env={"UV_PROJECT_ENVIRONMENT": str(test_venv_dir("demo"))}` on the `Command`.
+       The venv dir is deleted before this step, so every build recreates it from
+       the pinned interpreter.
     5. `uv --directory components/demo build --wheel --out-dir <stage>`
     6. `uv --directory components/demo export --frozen --no-dev --no-emit-project --all-extras --format requirements-txt -o <stage>/requirements.txt`
     7. (only if the `sdist-build` dependency group exists) `uv --directory components/demo export --frozen --only-group sdist-build --no-emit-project --format requirements-txt -o <stage>/build-requirements.txt`
   - `test_build_stops_on_failing_tests`: runner exit 1 at step 4 means `ComponentError`
     and nothing staged.
+  - `test_build_asserts_test_venv_is_pinned_interpreter`. After step 4's venv
+    creation (`uv --directory components/demo venv --python <interp>` with the same
+    `UV_PROJECT_ENVIRONMENT`), `build()` reads `<test_venv_dir>/pyvenv.cfg`:
+    - `home` must equal the cached interpreter's `bin` directory;
+    - `version` must equal `pin.version`.
+
+    A fixture `pyvenv.cfg` with `home = /usr/bin` makes it raise `ComponentError`
+    naming both paths, and pytest is never run. The step order becomes: `venv`, then
+    the assert, then `run … pytest`.
   - `test_build_stages_deps_from_lock`: given a fixture `uv.lock` with a `pymqi`
     sdist entry (url + `sha256:`), `deps/` receives that file (fetch injected) and its
     hash is verified.
@@ -672,9 +685,12 @@ is revised before T3 (spec §11). There is no workaround by fallback.
     - parse `--runtime-pin` and `--components` (both REQUIRED, like `--os-pin`; an
       empty `--components ""` is allowed);
     - pass both to `_manifest-hash.sh`;
-    - when non-empty, append `-e @"$MAIN_ROOT/build/work/components/install-vars.json"`
-      and `-e baked_components=<names>` to `BAKE_EXTRA_VARS`. Match the script's
-      existing `MAIN_ROOT` idiom, which is used for `ANSIBLE_COLLECTIONS_PATH`.
+    - accept `--install-vars <path>`, which is REQUIRED when `--components` is
+      non-empty (exit 2 otherwise). `box.py` passes `install_vars(...)`'s return
+      value, which comes from `paths.work`, so the script never builds a `build/`
+      path itself (Global Constraints);
+    - when `--components` is non-empty, append `-e @<install-vars>` and
+      `-e baked_components=<names>` to `BAKE_EXTRA_VARS`.
   - In `_manifest-hash.sh`, add both values to the digest input with a header comment
     in the house style. Explain why the hash keys on the **tree hash, not the
     artifact**, citing #649/#1324/#1087 as the precedent.
@@ -691,7 +707,10 @@ is revised before T3 (spec §11). There is no workaround by fallback.
   - `test_box_build_builds_missing_component_artifact`: with `ensure_built`
     monkeypatched, a BUILD of `pcmk-ubuntu24` calls it for
     `mq-resiliency-observability` before the builder step.
-  - `test_builder_args_carry_components_and_pin`.
+  - `test_builder_args_carry_components_and_pin` (including `--install-vars`
+    whenever components are present).
+  - `test_fatbox_requires_install_vars_with_components`: `build-fatbox.sh` with
+    `--components demo@aaa` and no `--install-vars` exits 2.
   - `test_box_build_records_baked_components`: the builder's post-bake step writes
     `<box>-<arch>.components.json` with the pin and the tree hashes.
   - `test_box_status_shows_baked_components`.
@@ -1110,9 +1129,12 @@ The bake playbooks start including these roles in T7 and T9. That's when
 
 **Files:**
 
-- Modify: `ansible/roles/mq-client/tasks/main.yml:40,57-72` (drop `python3-venv`
-  from the apt line; keep `python3-dev`/`gcc` only if T2 showed pymqi needs them,
-  since the runtime tarball ships its own headers; delete the mqvenv create + pip)
+- Modify: `ansible/roles/mq-client/tasks/main.yml:40,57-72`:
+  - drop `python3-venv` and `python3-dev` from the apt line (the pinned runtime
+    ships its own headers);
+  - **keep `gcc`**, because `mqlab component install mq-resiliency-clients`
+    recompiles pymqi on the running box (spec §5.8; removed only by `.github#298`);
+  - delete the mqvenv create + pip.
 - Modify: `ansible/roles/mq-inter-qm/tasks/{install.yml,main.yml}` (delete the rvenv
   create/pip and the `svc_responder.py` copy; render `mq-svc-responder.env`)
 - Modify: `ansible/roles/app-requester/tasks/main.yml` (render the env; delete the
@@ -1145,6 +1167,9 @@ The bake playbooks start including these roles in T7 and T9. That's when
     `/home/vagrant/*.py` (an explicit list), `/var/mqm/rvenv` and
     `/var/mqm/svc_responder.py` are `state: absent`.
   - `test_mq_ubuntu_bake_installs_clients_component`.
+  - `test_mq_client_keeps_compiler_drops_distro_python_dev`: the apt task in
+    `mq-client` installs `gcc` and installs neither `python3-venv` nor
+    `python3-dev`. No task removes `gcc`.
   - `test_authz_validate_plays_call_entry_points`: each probe task's command starts
     with `/opt/logical-minds-foundry/mq-resiliency-clients/venv/bin/mq-`.
 - [ ] **Step 2:** Rewrite the roles following T7's shape: assert baked, retire old
