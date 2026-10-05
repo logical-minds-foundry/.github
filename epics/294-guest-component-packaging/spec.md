@@ -5,7 +5,9 @@
 - **Origin:** `logical-minds-foundry/.github#293` (triage seed with the full
   evidence)
 - **Parallel epic (M2):** seeded from `vergil-project/.github#355`
-- **Follow-on (seeded):** `logical-minds-foundry/.github#296`, M3
+- **Follow-ons (seeded):** `logical-minds-foundry/.github#296` (M3: the lab
+  consumes published packages); `logical-minds-foundry/.github#298` (build and
+  publish our own binary wheels, pymqi first)
 - **Member repo:** `logical-minds-foundry/mq-resiliency-lab-for-linux`
 - **Status:** design (brainstorm output), pending review
 - **Date:** 2026-10-05
@@ -99,14 +101,16 @@ The path is three milestones, each its own epic:
 | Component source tree, lock and tests | built | same | yes |
 | Pinned interpreter | installed by the lab | runtime package | yes |
 | `/opt` layout, unit files, `/etc/opt` config | created by the install recipe | created by the package | yes, identical |
-| "Venv from source + lock" recipe | runs on the guest | runs in CI, wrapped into a package | yes |
+| Build recipe (wheel from source + hash-pinned dependency set) | wheel built on the dev VM; venv assembled on the guest | runs in CI; output wrapped into a package | yes |
 | Ansible `component-install` backend | build from source | `apt`/`dnf install` | one thin backend swapped |
 
 ## 3. Goals
 
 1. **Tested runtime = deployed runtime.** Guest code is only ever parsed and
-   run by the exact interpreter build it was tested on, identical on every OS
-   and arch.
+   run by the pinned interpreter build it was tested on: the same build
+   (version + python-build-standalone release) on every OS and arch, and
+   byte-identical within an arch. The on-box self-check (§5.4 rule 4) covers
+   the cross-arch gap.
 2. **Components are standalone standard projects.** Each component lives in its
    own directory under `components/`. It is a standard uv project that knows
    nothing about Vergil or the lab, so extracting it into its own repo means
@@ -211,6 +215,19 @@ resolution, coupling them to mqlab's tier.
 
   The hashes are those of the `install_only` artifacts, copied from the
   release's `SHA256SUMS`. A missing or malformed entry fails loudly.
+- **One fetch path for dev and guests.** The pinned tarball for each arch is
+  downloaded once into `$(mqlab build path cache)/runtime/`, verified against
+  the pin, and used **both** by `mqlab component build` on the dev VM (§5.6) and
+  by the `runtime-install` role on guests (§5.7). The build does **not** use
+  `uv python install`, for two reasons. uv's interpreter list is compiled into
+  each uv release and lags python-build-standalone: on 2026-10-05 neither the
+  dev VM's uv 0.12.21 nor the container's uv 0.12.7 offered 3.14.8. And a
+  uv-managed install leaves no tarball whose hash could be checked against the
+  pin.
+- **The tarball is self-sufficient for installs.** The 3.14.8 `install_only`
+  tarball ships `pip`, `python3.14-config` and `Python.h` (checked by listing
+  the aarch64 artifact), so guests install with the venv's own `pip` and need
+  no `uv`.
 - **Policy: the contract is the minor version; each build pins the patch.**
   Components declare `requires-python = "==3.14.*"`. Moving to a new patch is a
   one-file PR: component builds rerun on the new interpreter, and the next bake
@@ -295,7 +312,7 @@ nothing will ever depend on.
 |---|---|---|
 | Contents | `clusterstate`, `nativehastate`, `rdqmstate`, `loglifecycle` and their tests | `app_requester`, `bench_client`, `svc_responder`, `authz_probe`, `dlq_probe`, `reconnect_probe`, `dr_flow`, `dr_responder`, `dr_mqi`, `dr_baseline`, `dr_forced`, plus `dr.*` and `header` (from `src/mqlab`) and their tests |
 | Entry points | `lab-cluster-state`, `lab-nativeha-state`, `lab-loglifecycle-state`, `lab-rdqm-state`, `mq-resiliency-observability-selfcheck` | `mq-app-requester`, `mq-bench`, `mq-svc-responder`, `mq-authz-probe`, `mq-dlq-probe`, `mq-reconnect-probe`, `mq-dr-flow`, `mq-dr-responder`, `mq-dr-baseline`, `mq-dr-forced`, `mq-resiliency-clients-selfcheck` |
-| Third-party deps | none (stdlib) | `pymqi`, pinned and hash-locked, compiled from sdist against the box's MQ SDK |
+| Third-party deps | none (stdlib) | `pymqi` in the **`mqi` extra** (`[project.optional-dependencies] mqi = ["pymqi==1.12.13"]`), hash-locked and compiled from sdist against the box's MQ SDK at install. Tests run **without** the extra, keeping today's lazy `pymqi` import + fake-module approach (`tests/test_app_requester.py:3-4,109`), because the dev VM has no MQ SDK and pymqi is sdist-only. |
 | Hosts | pcmk, san, nativeha, rdqm nodes | app-client, svc-sim |
 | Replaces | the `/usr/local/bin` copies, the duplicate `nativehastate.py`, the `loglifecycle` import fallback, the cut-down `mqlab` on RDQM | `mqvenv` (rebuilt each provision), `rvenv`, loose scripts in `~/` and `/var/mqm`; deploys the DR clients for the first time (fixes `dr-run.sh` on svc-sim) |
 
@@ -308,23 +325,39 @@ repo code is M3's job.
 
 Runs on the dev VM. It is the **only** producer of installable artifacts.
 
-1. Read `runtime.python` from `lab/versions.yaml`. Ensure the exact pinned
-   interpreter is available locally (`uv python install`), and verify the
-   interpreter build against the pin.
-2. In `components/<name>/`, run `uv lock --check`. A stale lock refuses the
+1. Refuse if `components/<name>/` has uncommitted changes, because an artifact
+   must correspond to a commit. The artifact's identity is the component's
+   **git tree hash** (`git rev-parse HEAD:components/<name>`).
+2. Read `runtime.python` from `lab/versions.yaml`. Ensure the pinned tarball for
+   the dev VM's arch is in `$(mqlab build path cache)/runtime/`, verify its
+   sha256 against the pin, and unpack it there (§5.2). Never `uv python
+   install`.
+3. In `components/<name>/`, run `uv lock --check`. A stale lock refuses the
    build.
-3. Run `uv run --frozen --python <pinned interpreter> pytest`. Any failure
-   refuses the build.
-4. Refuse if `components/<name>/` has uncommitted changes, because an artifact
-   must correspond to a commit.
-5. Stage to `$(mqlab build path cache)/components/<name>/<version>+<sha>/`:
-   - `source.tar.gz`: `git archive` of `components/<name>` at HEAD;
+4. Run `uv run --frozen --python <cached pinned interpreter> pytest`, with no
+   extras, so the clients' `mqi` extra (pymqi) is not installed on the dev VM
+   (§5.5). Any failure refuses the build.
+5. Build the component wheel: `uv build --wheel`, a standard PEP 517 build from
+   the source tree that yields a pure-Python `py3-none-any` wheel. This is the
+   artifact M2 later packages.
+6. Stage to `$(mqlab build path cache)/components/<name>/<version>+<tree>/`:
+   - the component wheel;
    - `requirements.txt`: `uv export --frozen --no-dev --no-emit-project`,
-     hash-pinned;
-   - `deps/`: every locked dependency artifact, sdists included, so installs
+     plus `--extra mqi` for the clients, hash-pinned;
+   - `build-requirements.txt`, hash-pinned, plus its artifacts: the build
+     requirements of any **sdist** dependency. For pymqi that is `setuptools`
+     and `wheel`. pymqi has no `[build-system]` table, and its `setup.py`
+     imports `distutils` (removed from the stdlib in 3.12), which only resolves
+     through setuptools' shim. `uv export` never emits build requirements, so
+     the build stages them explicitly;
+   - `deps/`: every locked dependency artifact (sdists included), so installs
      never reach PyPI and offline RHEL works;
-   - `BUILD.json`: name, version, sha, runtime pin and test result.
-6. Point `components/<name>/current` in the cache at the new artifact.
+   - `BUILD.json`: name, version, git tree hash, commit sha, runtime pin and
+     test result.
+7. Point `components/<name>/current` in the cache at the new artifact.
+
+The box builder calls the same verb (§5.8), so a cold rebuild needs no manual
+pre-step.
 
 `mqlab component status [--host …]` reads `BUILD.json` locally and
 `INSTALLED.json` on guests, and reports what is built and what is running where,
@@ -338,9 +371,14 @@ One Ansible role, used both by the bake plays and by `mqlab component install
 1. **Precondition:** `/opt/vergil/cpython-3.14/` exists and matches the pin. If
    not, fail with a message naming the `mqlab` command that fixes it.
 2. Copy the staged artifact (`current`, or an explicit version) to the guest.
-3. Build `venv.new` on the pinned interpreter. Install dependencies with
-   `--require-hashes --no-index --find-links deps/`, then the project with
-   `--no-deps`. `pymqi` compiles here, against the MQ SDK.
+3. Build `venv.new` with `/opt/vergil/cpython-3.14/bin/python3 -m venv`. All
+   installs use **that venv's own `pip`** (no `uv` on guests), always with
+   `--no-index --find-links deps/`:
+   1. the build requirements, `--require-hashes -r build-requirements.txt`;
+   2. the dependencies, `--require-hashes --no-build-isolation -r
+      requirements.txt`. `pymqi` compiles here, against the MQ SDK, using the
+      setuptools installed in step 1;
+   3. the component wheel, `--no-deps`.
 4. Run `<name>-selfcheck` from `venv.new`. On failure, **leave the live venv
    untouched**, report, and fail.
 5. Swap atomically: the current venv becomes `venv.prev` and `venv.new` becomes
@@ -354,12 +392,21 @@ its sha256 against the pin, and is idempotent.
 ### 5.8 Bake and the dev loop
 
 - **Baked:** the interpreter, each component's dependencies (including the
-  pymqi compile) and the component itself, at the `current` artifact. A cold
-  provision needs nothing else.
+  pymqi compile) and the component itself, at the artifact matching the
+  component's **current git tree hash**. A cold provision needs nothing else.
+- **Staleness keys on source, not artifacts.** For a box that bakes a
+  component, the box manifest hash (`lab/boxes/_manifest-hash.sh`) folds in
+  the component's git tree hash and the `runtime.python` pin. Any committed
+  code change or pin bump flips the hash and forces a rebake. Keying on the
+  `current` artifact instead would let an edited-but-unbuilt component reuse a
+  stale box, the bug class that script documents for #649, #1324 and #1087.
+- **The box builder builds what is missing.** Before baking, it looks for the
+  artifact matching the tree hash. If there is none in the cache, it runs
+  `mqlab component build <name>` itself, with the full test gate. A cold
+  rebuild from a fresh clone or a cleaned cache is therefore one pass.
+  Uncommitted component changes still refuse (§5.6 step 1), naming the fix.
 - **Recorded:** each fat box records in its box metadata which component
-  versions it baked. The runtime pin and the component artifacts feed the box
-  manifest hash (`lab/boxes/_manifest-hash.sh`), so a changed component or pin
-  marks the box stale.
+  versions and tree hashes it baked.
 - **Dev loop:** `mqlab component install <name> --host …` reruns the same
   recipe against a running lab and picks up new code in seconds. In M3 this
   operation becomes `apt install`/`dnf upgrade` of a newer package version.
@@ -404,7 +451,7 @@ Every implementation task lands in `mq-resiliency-lab-for-linux`.
 | # | Task | Kind | Blocked by |
 |---|---|---|---|
 | T1 | Spec + plan (`.github#295`) | docs bookend | — |
-| T2 | **Spike: runtime feasibility.** python-build-standalone 3.14.8 runs on RHEL 9.6 (x86_64) and Ubuntu 24.04 (both arches); `pymqi` compiles from sdist into a venv on that interpreter against the MQ SDK; an offline, hash-pinned install from staged artifacts works on RHEL. Report in `docs/reports/`. | impl | T1 |
+| T2 | **Spike: runtime feasibility.** python-build-standalone 3.14.8 runs on RHEL 9.6 (x86_64) and Ubuntu 24.04 (both arches); `pymqi` 1.12.13 compiles from sdist on Python 3.14 into a venv on that interpreter, against the MQ SDK, with `--no-build-isolation` and staged setuptools (pymqi declares no `requires_python` and no Python classifiers, so 3.14 support is undeclared); the full offline, hash-pinned install (§5.7) works on RHEL. Report in `docs/reports/`. | impl | T1 |
 | T3 | Boundary foundations: `components/`, the `runtime:` pin in `lab/versions.yaml`, root ruff `extend-exclude`, `.ansible-lint.yml` `exclude_paths`, the boundary test, and a developer doc for the component contract | impl | T2 |
 | T4 | `mqlab component build` + `status` | impl | T3 |
 | T5 | `runtime-install` + `component-install` roles + `mqlab component install` | impl | T4 |
@@ -416,17 +463,29 @@ Every implementation task lands in `mq-resiliency-lab-for-linux`.
 | V2 | Cold rebuild, RHEL stacks (rdqm, nha-rhel-crr), x86 cloud host | validation | T7, T9 |
 | — | Documentation review (`mq-resiliency-lab-for-linux#1348`) | bookend | V1, V2 |
 | — | Follow-on brainstorm: M3 (`.github#296`) | bookend | V1, V2 |
+| — | Follow-on brainstorm: our own binary wheels, pymqi first (`.github#298`) | bookend | V1, V2 |
 | — | Retrospective (`.github#297`) | terminal bookend | all |
 
 After T3 there are two parallel tracks: T4 → T5 (machinery) and T6/T8
 (carve-outs).
 
-**Cutover is per component, with no dual running.** Each rewire task replaces
-the old delivery path in the same PR and **removes** the old artifacts from
-existing guests: the `/usr/local/bin` collectors, `/usr/local/lib/lab-rdqm-state`,
-`mqvenv`, `rvenv` and the loose scripts. A re-provisioned lab therefore cannot
-keep running stale copies. The dashboards stay dark until V1/V2; that was a
-deliberate choice over an interim patch.
+**T6 through T9 are one chain, validated as a unit.** T6 deletes the
+`src/mqlab` collector copies and T8 moves `clients/`, while the roles still
+`copy` those paths until T7 and T9 rewire them
+(`ansible/roles/cluster-state/tasks/main.yml:14`,
+`nativeha-state/tasks/main.yml:15,25,31`, `rdqm-state/tasks/main.yml:25`,
+`app-requester/tasks/main.yml:5`, `bench-client/tasks/main.yml:8`,
+`mq-inter-qm/tasks/main.yml:66`). So **develop is not guaranteed to provision
+between T6 and T9**. That is accepted deliberately: no running lab is needed
+during the work, and splitting the PRs further, or cold-rebuilding after each
+step, would cost more than it buys. The chain is validated once, by V1/V2, after
+all of it has landed, and the epic ends with a running lab.
+
+**No dual running.** The rewire tasks replace the old delivery path and
+**remove** the old artifacts from guests: the `/usr/local/bin` collectors,
+`/usr/local/lib/lab-rdqm-state`, `mqvenv`, `rvenv` and the loose scripts. A
+re-provisioned lab cannot keep running stale copies. The dashboards stay dark
+until V1/V2; that was a deliberate choice over an interim patch.
 
 ## 9. Validation
 
@@ -454,6 +513,10 @@ on the x86 cloud host, since the RHEL boxes are x86_64-only.
   `/opt/<org>/<repo>/` rule, the static-unit + `/etc/opt` config split, and the
   `venv.new` → selfcheck → swap recipe.
 - **`.github#293`:** closed as promoted into this epic.
+- **`.github#298` (own binary wheels):** factoring the pymqi compile out of the
+  lab (gcc, the MQ SDK and staged setuptools at bake; the `mqi` extra kept off
+  the dev VM) is the real long-term fix. M1 accepts the from-source compile as
+  the realistic short-term choice.
 - **Superseded records:** the "deployed verbatim onto system Python" decision in
   `docs/plans/2026-06-14-cluster-cockpit-plan-1a-collector.md`,
   `docs/plans/2026-06-18-nativeha-cockpit-build-pr1-collector.md`,
@@ -471,7 +534,10 @@ on the x86 cloud host, since the RHEL boxes are x86_64-only.
 |---|---|---|
 | python-build-standalone 3.14.8 exists for x86_64 and aarch64 linux-gnu | **data** (the release's `SHA256SUMS`, checked 2026-10-05) | — |
 | One python-build-standalone glibc build runs on both RHEL 9.6 and Ubuntu 24.04 | **judgment** (how the project builds its artifacts; not verified on our boxes) | T2 spike |
-| `pymqi` compiles from sdist against the MQ SDK into a venv on a python-build-standalone interpreter | **judgment** (historically, python-build-standalone sysconfig quirks have affected C-extension builds) | T2 spike |
+| uv cannot yet install 3.14.8, and a uv-managed install cannot be verified against the tarball pin | **data** (uv 0.12.21 on the dev VM and 0.12.7 in the container list only 3.14.7, checked 2026-10-05) | build uses the cached tarball (§5.2, §5.6) |
+| The 3.14.8 tarball ships `pip`, `python3.14-config` and `Python.h` | **data** (listing of the aarch64 `install_only` artifact) | — |
+| `pymqi` 1.12.13 is sdist-only, has no `[build-system]`, and imports `distutils` in `setup.py` | **data** (PyPI JSON and the sdist contents, checked 2026-10-05) | staged setuptools + `--no-build-isolation` (§5.6, §5.7) |
+| `pymqi` compiles on Python 3.14 against the MQ SDK into a venv on a python-build-standalone interpreter | **judgment** (pymqi declares no supported Python versions; historically, python-build-standalone sysconfig quirks have affected C-extension builds) | T2 spike |
 | Fully offline, hash-pinned installs work on RHEL from staged artifacts | **judgment** | T2 spike |
 | `vrg-validate` ignores `components/` except for ansible-lint | **data** (vergil-tooling `lib/languages.py`, `bin/validate_common.py`, as installed) | T3 config + boundary test |
 | The mqlab CLI imports none of the modules leaving `src/mqlab` | **data** (grep on `develop` @ `700fe7e`) | T6/T8 boundary test |
