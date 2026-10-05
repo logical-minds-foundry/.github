@@ -38,8 +38,8 @@ epic.
 ### 1.1 Current state (verified against `develop` @ `700fe7e`)
 
 - **No guest code is packaged.** The only `pyproject.toml` builds `src/mqlab`,
-  the dev-host CLI. One setting governs everything: `requires-python
-  >=3.14,<3.15`, ruff `py314`. No guest Python version is pinned or recorded
+  the dev-host CLI. One setting governs everything:
+  `requires-python >=3.14,<3.15`, ruff `py314`. No guest Python version is pinned or recorded
   anywhere.
 - **Collectors** (`clusterstate`, `nativehastate`, `rdqmstate`, `loglifecycle`)
   are modules inside `src/mqlab`. Ansible `copy`s them as single files into

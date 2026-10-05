@@ -657,7 +657,7 @@ is revised before T3 (spec §11). There is no workaround by fallback.
     (the collection isn't guaranteed in the bake's `ANSIBLE_COLLECTIONS_PATH`).
   - `test_component_install_swaps_only_after_selfcheck`: the selfcheck task index is
     less than the swap task index, and the swap task contains `mv venv.new venv`.
-  - `test_component_install_never_uses_uv_or_pypi`: no task text contains `uv ` or
+  - `test_component_install_never_uses_uv_or_pypi`: no task text invokes `uv` (matched as the word `uv` followed by a space) or contains
     `pypi`, and every `pip install` carries `--no-index`.
   - `test_runtime_install_verifies_sha_before_unpack`.
   - `test_runtime_install_never_sets_ansible_python_interpreter`.
