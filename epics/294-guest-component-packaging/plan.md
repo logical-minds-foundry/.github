@@ -1,6 +1,12 @@
 # Guest component packaging (M1) — Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+>
+> **As built (2026-10-07):** this plan was executed (T2–T9, V1 #1357, V2 #1358). Where
+> implementation diverged from the steps below, the spec's **§0 As-built errata** is
+> authoritative. In particular, T5's `venv.new` → `venv` swap was replaced by versioned
+> releases with an atomic symlink flip (#1372). The validations also added fix tasks
+> #1374 and #1377–#1380.
 
 **Goal:** Every guest component is a standalone uv project under `components/`,
 built and tested on one pinned CPython 3.14 build, and installed from staged,
