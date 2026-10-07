@@ -9,8 +9,27 @@
   consumes published packages); `logical-minds-foundry/.github#298` (build and
   publish our own binary wheels, pymqi first)
 - **Member repo:** `logical-minds-foundry/mq-resiliency-lab-for-linux`
-- **Status:** design (brainstorm output), pending review
-- **Date:** 2026-10-05
+- **Status:** implemented and validated (V1 #1357, V2 #1358). Where reality
+  corrected this design, see **§0 As-built errata**, which takes precedence over the
+  sections it names.
+- **Date:** 2026-10-05 (errata 2026-10-07)
+
+## 0. As-built errata
+
+Implementation and the cold-rebuild validations corrected parts of the approved design.
+The design text below is kept as the record of what was decided; these errata record
+what shipped. The authoritative as-built description of the component contract and
+install layout is `components/README.md` in `mq-resiliency-lab-for-linux`.
+
+| # | Section | As designed | As built | Evidence |
+|---|---|---|---|---|
+| E1 | §1.1 | "RHEL guests are offline and use the DVD repo" | **False.** RHEL guests can reach PyPI. The guarantee M1 makes is that **installs never consult an index** (`--no-index --find-links`, hash-pinned), not that the network is absent. | T2 spike (`docs/reports/2026-10-guest-runtime-spike.md` §5), V2 #1358 |
+| E2 | §5.3, §5.7 | build `venv.new`, rename to `venv`, keep `venv.prev` | **Python venvs are not relocatable** (pip writes absolute shebangs), so the rename broke every entry point (203/EXEC). Each install is now a release built at its final path and never moved: `releases/<version>+<tree>-<stamp>/venv`. Going live is an atomic `venv` symlink flip (`ln -s` + `mv -T`) that records `previous`. A selfcheck runs in place before the flip and again through `venv/bin` after it, flipping back on failure. Releases are pruned to live + previous. | V1 #1357 run 1, fix #1372 |
+| E3 | §5.2, §5.6 | the dev-VM interpreter unpacks in `build/cache/runtime` | The **tarball** is cached in `build/cache/runtime`. It is **unpacked** under `$XDG_CACHE_HOME/mqlab/runtime` because `build/` is a case-insensitive macOS virtiofs mount (`share/terminfo` has case-colliding names). The test venv's assertion keys on `pyvenv.cfg` `home` (the token-keyed interpreter dir), because uv may record only the minor in `version_info`. | spike C3, T4 #1351 |
+| E4 | §5.7 | sdist dependencies compile with the runtime's toolchain | python-build-standalone's sysconfig names `clang`, which the guests lack. `component-install` exports `CC`/`LDSHARED` derived from that sysconfig with the leading `clang` swapped for `gcc`, keeping the recorded hardening flags. | spike C2, T5 #1352 |
+| E5 | §5.5, §9 | `mq-bench` on app-client for every stack; `dr-run.sh` completes on app-client and svc-sim | `mq-bench` is **Native HA only** (the wrapper is rendered only for Native HA stacks; #1380). The DR criterion was narrowed by the human to "the DR entry points complete a TLS MQCONNX" (#1377); `dr-run.sh` end to end is deferred to #1375. Native HA is the primary requirement; RDQM and Pacemaker are secondary. | #1377, #1380, V1/V2 |
+| E6 | §5.6 | `mqlab component status --host` parses ansible's JSON | Ansible output here carries timing-callback lines around the JSON; the parser decodes exactly one JSON document from the first `{`. | #1374 |
+| E7 | §5.8 | the textfile drop zone is owned by the node-exporter role | Four roles silently reset it to `0755`; only node-exporter and app-requester may manage it (`02775`), and `.prom` files are created so node_exporter's ACL read stays effective (`0640` + mask `r--`; no world access). | V2 #1358, #1378 |
 
 ## 1. Problem and motivation
 
