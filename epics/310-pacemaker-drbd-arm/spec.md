@@ -68,10 +68,13 @@ adds — and an evidence-based decision on the future of `pacemaker-san`.
 - **No change to `pcmk-ubuntu` / `pacemaker-san`** during this epic. It stays built
   and working until the G4 decision; any retirement or extraction is its own
   follow-on epic.
-- **No full parity with `pcmk-ubuntu`.** The distributed app↔SVC workload,
-  observability, cockpit boards, authz service accounts, and TLS are out of scope,
-  except where the stack registry provides them unchanged. Anything needing real work
-  goes on a follow-on list (§9).
+- **No full parity with `pcmk-ubuntu`.** Observability, exporters, and cockpit
+  boards are out of scope, except where the stack registry provides them unchanged.
+  Anything needing real work goes on a follow-on list (§9). **In scope by
+  necessity:** the distributed app↔SVC workload together with its TLS and CHLAUTH
+  authz, because the drill set's `mqlab qm e2e` traffic runs through exactly that
+  flow (`src/mqlab/e2e.py`: app-client → APP.SVRCONN → `<short>APP` → SDR/RCVR →
+  SVCQM → responder, over TLS).
 - **No performance or timing claims.** The RDQM arm runs under x86 emulation; the
   comparison is functional only (consistent with
   `docs/specs/2026-06-15-rdqm-parity-pivot-design.md` §2).
@@ -88,7 +91,9 @@ adds — and an evidence-based decision on the future of `pacemaker-san`.
 | D2 | **DRBD 9 from LINBIT's PPA (`drbd-dkms`).** | *Data:* the mainline in-kernel DRBD is 8.4.11, "intended for 2-node failover clusters"; DRBD 9 supports up to 31 peers per volume and adds quorum for 3+ nodes; DRBD 9 in mainline is targeted "possibly as soon as Linux 7.2", not merged ([LINBIT, 2026-04-27](https://linbit.com/blog/working-to-put-drbd-9-in-the-mainline-linux-kernel/)). LINBIT publishes DRBD 9 for Ubuntu LTS at [`ppa:linbit/linbit-drbd9-stack`](https://launchpad.net/~linbit/+archive/ubuntu/linbit-drbd9-stack). RDQM's media ships `Advanced/RDQM/PreReqs/el9/kmod-drbd-9/` (member repo `docs/reference/rdqm-ha-cheatsheet.md`). *Judgment:* in-kernel 8.4 cannot reproduce RDQM's 3-node group; waiting for mainline is not plannable. |
 | D3 | **RDQM's live configuration is the blueprint.** | Designing from upstream docs alone risks another "similar in spirit" mismatch — the failure mode the SAN represents. |
 | D4 | **Follow RDQM over existing lab habit:** no SAN, **no Booth**; DR is operator-driven. | RDQM DR is promoted/demoted by an operator (`rdqmdr`), not automatically arbitrated. |
-| D5 | **Scope: core + comparison** (§2). | Answers "what does IBM add" without paying for full parity; full parity becomes the natural follow-on only if G4 retires `pcmk-ubuntu`. |
+| D5 | **Scope: core + comparison** (§2), including the distributed workload + TLS + authz that `qm e2e` needs. | Answers "what does IBM add" without paying for full parity; full parity becomes the natural follow-on only if G4 retires `pcmk-ubuntu`. The drills need real app traffic, the same evidence the RDQM arm produces. |
+| D6 | **`mqlab dr cutover` / `failback` dispatch on each stack's own `dr-cutover` / `dr-failback` verbs**, and `--rpo0-drill` works on any arm. | Today `_dr_run` refuses every mechanism except `rdqm` and always shells `rdqm-dr-cutover.sh` (`src/mqlab/cli.py`); without this, drill 5 cannot be one command on both arms. |
+| D7 | **A new `pdrbd-qm` role; `mq-pcmk-qmgr` is not modified.** | `mq-pcmk-qmgr` is SAN-shaped throughout (`/mqshared`, the `MQSHARED` label, `mq_fs`); changing it would put the working `pcmk-ubuntu` arm at risk, contradicting D1. |
 
 ## 4. Approaches considered
 
@@ -131,12 +136,17 @@ ledgered (§6.2). The "expected" column below is the brainstorm's working hypoth
   box, so nodes never compile a kernel module at boot. Whether that is a new
   `pdrbd` box role or an addition to the existing `pcmk` box is a plan decision.
 - **Roles:** new `drbd9` (repo, DKMS module, module load, VG on the extra disk); new
-  `pdrbd-qm` (per-QM LV, DRBD resource, filesystem, Pacemaker resources). Reused:
-  `pcmk-cluster`, the existing MQ queue-manager resource agent wiring
-  (`mq-pcmk-qmgr`, refactored only as far as needed to run on a DRBD-backed
-  filesystem instead of an iSCSI one). **Untouched:** `drbd-san`, `iscsi-*`, the SAN
-  networks.
-- **Parity matrix:** a `pcmk-drbd-ubuntu` row in `src/mqlab/parity.py` `MATRIX`.
+  `pdrbd-qm` (per-QM LV, DRBD resource, filesystem, Pacemaker resources, and the QM
+  create-and-hand-over sequence for a DRBD-backed volume). `pdrbd-qm` reuses the
+  arm-neutral pieces — the `inter-qm.mqsc.j2` / `authz.mqsc.j2` templates,
+  `mq-diag-logging`, `mq-event-monitor`, `pki-distribute` — and any template it
+  shares is moved to a shared location with the old path kept working. Reused as-is:
+  `pcmk-cluster`, and `site-distributed-shared.yml` for the app↔SVC workload.
+  **Untouched:** `mq-pcmk-qmgr`, `drbd-san`, `iscsi-*`, the SAN networks.
+- **Stack registry touchpoints:** a `"pacemaker-drbd": "PCMK-DRBD"` entry in
+  `_MECH_LABEL` (`src/mqlab/stacks.py`; `dashboard_folder_for` fails loud on an
+  unlabelled mechanism), and a `pcmk-drbd-ubuntu` row in `src/mqlab/parity.py`
+  `MATRIX`.
 
 ### 5.2 Stack verbs
 
@@ -147,6 +157,15 @@ ledgered (§6.2). The "expected" column below is the brainstorm's working hypoth
 | `qm-status` | `pcs status resources` plus `drbdadm status <res>` — the open-source counterpart of `rdqmstatus` |
 | `dr-cutover` / `dr-failback` | Playbook mirroring `rdqmdr -s` / `-p`: stop and demote at the active site, promote and start at the other. Operator-run, never automatic |
 | `diagnostics` | `runmqras`, as on the other arms |
+
+**DR dispatch (D6).** `mqlab dr cutover|failback <stack>` resolves the stack's own
+`dr-cutover` / `dr-failback` verb instead of hardcoding the RDQM script: `rdqm-rhel`
+declares its existing `rdqm-dr-cutover.sh` flow, `pcmk-drbd-ubuntu` declares its
+playbook, and a stack that declares no DR verb is refused with a clear message.
+`--rpo0-drill` (seed a persistent message before the cut, assert it at the peer) is
+generalised so it runs against any stack with a DR verb. The Native HA stacks'
+already-declared DR verbs become reachable through `mqlab dr` as a by-product; that
+is not a goal of this epic and is not separately validated here.
 
 ## 6. The RDQM blueprint and the deviation ledger
 
@@ -222,8 +241,14 @@ from interpretation (data vs. judgment), with checkable citations.
   2. Hard kill of the active node (`virsh destroy`).
   3. Partition of the HA replication network (`lab/scripts/net-down.sh net-hb-a`).
   4. Loss of 2 of 3 HA nodes — quorum-loss behavior must match RDQM's.
-  5. DR cutover and failback, RPO measured with the existing `mqlab dr` accounting.
+  5. DR cutover and failback via `mqlab dr cutover|failback <stack> --rpo0-drill`
+     (the same command on both arms, per D6).
   6. Forced DR with a degraded replication link (`lab/scripts/drbd-degrade.sh`).
+     The script defaults to the SAN arm's `san-a` / `mqlun`, so the drill always
+     passes the node and DRBD resource explicitly for each arm.
+- **Parity matrix accuracy:** the `rdqm-rhel` row of `MATRIX` currently reads
+  `not_yet` for every verb, which predates the RDQM work since; task 9 corrects it
+  from the drill evidence so the comparison report does not cite a stale matrix.
 
 ## 9. Epic structure
 
@@ -235,22 +260,23 @@ Epic home: `logical-minds-foundry/.github` (the member repo is public).
 | 1 | `capture-rdqm-blueprint.yml` read-only capture playbook | impl | member | D |
 | 2 | Run the capture on the live RDQM arm; commit `docs/reference/rdqm-blueprint/`; seed the deviation ledger | impl (human runs capture) | member | 1 |
 | 3 | DRBD 9 bake: LINBIT PPA + `drbd-dkms` in a baked box; module proven to load | impl | member | D |
-| 4 | Topology: `pcmk-drbd-ubuntu` stack, `pdrbd_*` nodes/groups, extra disk, parity row | impl | member | 2 |
-| 5 | Site-A HA formation from the blueprint: VG, per-QM LV/DRBD/filesystem, Pacemaker group, `qm-*` verbs | impl | member | 2, 3, 4 |
-| 6 | DR: site B joins; `dr-cutover` / `dr-failback` playbooks | impl | member | 5 |
+| 4 | Topology: `pcmk-drbd-ubuntu` stack, `pdrbd_*` nodes/groups, extra disk, `_MECH_LABEL` entry, parity row | impl | member | 2 |
+| 5 | Site-A HA formation from the blueprint (`pdrbd-qm`): VG, per-QM LV/DRBD/filesystem, Pacemaker group, `qm-*` verbs, plus the distributed workload with its TLS and authz | impl | member | 2, 3, 4 |
+| 6 | DR: site B joins; `dr-cutover` / `dr-failback` playbooks | impl | member | 5, 6a |
+| 6a | `mqlab dr` dispatches on stack verbs; `--rpo0-drill` generalised (D6) | impl | member | D |
 | 7 | Cold rebuild brings the new arm up in one pass | validation | member | 6 |
 | 8 | Drill set on `rdqm-rhel` and `pcmk-drbd-ubuntu`, results recorded | validation | member | 7 |
-| 9 | Comparison report + finalized deviation ledger | impl (docs) | member | 8 |
+| 9 | Comparison report + finalized deviation ledger; correct the `rdqm-rhel` parity row from the drill evidence | impl (docs) | member | 8 |
 | 10 | `pacemaker-san` decision (retire / demote / extract), recorded as a decision doc; retirement or extraction becomes its own follow-on epic | impl (decision doc) | member | 9 |
 | R1 | Documentation review (`mq-resiliency-lab-for-linux#1419`) | docs bookend | member | 10 |
 | R2 | Retrospective (`#312`) — terminal | retrospective | `.github` | all |
 
-Tasks 1–2 and 3 run in parallel, so the DKMS risk surfaces before HA work. No
+Tasks 1–2, 3, and 6a run in parallel, so the DKMS risk surfaces before HA work. No
 follow-on brainstorm task is seeded: task 10 is the forward decision, and full
 parity with `pcmk-ubuntu` becomes a follow-on only if task 10 retires that arm.
 
 **Follow-on candidates (not in scope):** full `pcmk-drbd-ubuntu` parity
-(observability, cockpit, distributed workload, authz, TLS); `pacemaker-san`
+(observability, exporters, cockpit boards); `pacemaker-san`
 retirement or extraction per task 10; rerunning the comparison on an x86 host for
 timing.
 
