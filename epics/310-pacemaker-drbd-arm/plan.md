@@ -417,7 +417,9 @@ Add one row per element found in Step 3 (storage, replication, cluster, DR, tool
 
 - [ ] **Step 5: Reconcile Tasks 5 and 6 with the blueprint**
 
-For each hypothesis variable in Task 5's `defaults/main.yml` and Task 6's DR template (listed in those tasks under **Blueprint inputs**), record the blueprint value and its source file in a comment on the Task 5 and Task 6 issues, headed `Blueprint reconciliation`. Where the blueprint contradicts the hypothesis on a **structural** point — fencing is used; HA and DR are separate DRBD resources; RDQM uses an IBM agent for a role this plan assigns to `ocf:linbit:drbd` — say so in the comment and stop for the human: the affected task's steps are revised before it starts.
+For each hypothesis variable in Task 5's `defaults/main.yml` and Task 6's DR template (listed in those tasks under **Blueprint inputs**), record the blueprint value and its source file in a comment on the Task 5 and Task 6 issues, headed `Blueprint reconciliation`.
+
+**DR snapshot LV (explicit decision).** IBM documents a second LV per DR queue manager "to support the reverting to snapshot operation" (cached `recovery-requirements-rdqm-dr-solution/content.txt`). Record from `lvs.txt` whether it exists and its relationship to the QM LV, and add a `DR-n` ledger row: RDQM element = the revert-to-snapshot LV; open-source equivalent = not built; Status = **none**; Consequence = the recovery site cannot be reverted to its pre-resync state after a failed or partial resync. This is **not built** by default. If the blueprint shows that ordinary HA or DR operation (not just the revert operation) depends on it, treat that as a structural contradiction and stop for the human as below. Where the blueprint contradicts the hypothesis on a **structural** point — fencing is used; HA and DR are separate DRBD resources; RDQM uses an IBM agent for a role this plan assigns to `ocf:linbit:drbd` — say so in the comment and stop for the human: the affected task's steps are revised before it starts.
 
 - [ ] **Step 6: Validate and commit**
 
@@ -672,7 +674,8 @@ vrg-commit --type feat --scope bake --message "pdrbd box: LINBIT DRBD 9 (drbd-dk
 - Modify: `lab/versions.yaml` (`stacks:` entry)
 - Modify: `src/mqlab/stacks.py` (`_MECH_LABEL`)
 - Modify: `src/mqlab/parity.py` (`MATRIX` row)
-- Test: `tests/test_topology_pdrbd.py` (create), `tests/test_stacks.py` (dashboard folder), `tests/test_parity.py`
+- Modify: `src/mqlab/watcherboard.py` (`_owner_resource`: Pacemaker arms own the QM as `mq_qm`)
+- Test: `tests/test_topology_pdrbd.py` (create), `tests/test_stacks.py` (dashboard folder), `tests/test_parity.py`, `tests/test_watcherboard.py`
 
 **Interfaces:**
 - Consumes: box role `pdrbd` (Task 3).
@@ -772,6 +775,17 @@ def test_dashboard_folder_for_pacemaker_drbd():
     assert dashboard_folder_for("pacemaker-drbd", "ubuntu") == "PCMK-DRBD (Ubuntu)"
 ```
 
+Append to `tests/test_watcherboard.py` (the stack tiles must not silently show "No data" for the new arm — its Pacemaker resource is `mq_qm`, like `pcmk-ubuntu`):
+
+```python
+def test_owner_resource_is_mq_qm_for_both_pacemaker_mechanisms():
+    assert watcherboard._owner_resource("pacemaker-san", "PCMK") == "mq_qm"
+    assert watcherboard._owner_resource("pacemaker-drbd", "PDRBD") == "mq_qm"
+    assert watcherboard._owner_resource("rdqm", "RDQM") == "RDQMAPP"
+```
+
+(Match the module import style already used at the top of `tests/test_watcherboard.py`.)
+
 Append to `tests/test_parity.py`:
 
 ```python
@@ -783,7 +797,7 @@ def test_pdrbd_row_declares_every_verb_not_yet():
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `uv run pytest tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py -v`
+Run: `uv run pytest tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py tests/test_watcherboard.py -v`
 Expected: FAIL (`KeyError: 'pcmk-drbd-ubuntu'`, `ValueError: no dashboard-folder label for mechanism 'pacemaker-drbd'`).
 
 - [ ] **Step 3: Add the nodes, groups and stack to `lab/topology.yaml`**
@@ -896,15 +910,30 @@ _MECH_LABEL = {
     "pcmk-drbd-ubuntu": dict.fromkeys(VERBS, Support.NOT_YET),
 ```
 
+`src/mqlab/watcherboard.py`:
+
+```python
+_PACEMAKER_MECHANISMS = ("pacemaker-san", "pacemaker-drbd")
+
+
+def _owner_resource(mechanism: str, short: str) -> str:
+    """The `cluster_resource_owner` resource label for a stack. Pacemaker arms own the QM
+    via the pacemaker resource id (mq_qm); the other mechanisms own by the short-derived
+    QM name (#351)."""
+    if mechanism in _PACEMAKER_MECHANISMS:
+        return "mq_qm"
+    return f"{short}APP"
+```
+
 - [ ] **Step 6: Run tests to verify they pass; validate**
 
-Run: `uv run pytest tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py tests/test_dns.py tests/test_inventory.py -v` — expected: PASS (existing DNS/inventory tests must still pass with the new hosts and VIPs).
+Run: `uv run pytest tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py tests/test_watcherboard.py tests/test_dns.py tests/test_inventory.py -v` — expected: PASS (existing DNS/inventory tests must still pass with the new hosts and VIPs).
 Run: `vrg-container-run -- vrg-validate` — expected: green, 100% branch coverage.
 
 - [ ] **Step 7: Commit**
 
 ```bash
-vrg-git add lab/topology.yaml lab/versions.yaml src/mqlab/stacks.py src/mqlab/parity.py tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py
+vrg-git add lab/topology.yaml lab/versions.yaml src/mqlab/stacks.py src/mqlab/parity.py src/mqlab/watcherboard.py tests/test_watcherboard.py tests/test_topology_pdrbd.py tests/test_stacks.py tests/test_parity.py
 vrg-commit --type feat --scope topology --message "pcmk-drbd-ubuntu stack: nodes, groups, verbs, label, parity row (#<T4>)"
 ```
 
@@ -2057,6 +2086,69 @@ and make the block's `when:` read `not pdrbd_formed and not (pdrbd_dr_secondary 
 
 Run `crm_mon -1 -r` on a live site once (Task 5's bring-up) and adjust the `awk` to the actual "Promoted:" line format of this Pacemaker version before relying on it; the test asserts ordering, the live run asserts the parse.
 
+- [ ] **Step 5b: Watched wait for the DR initial sync (spec §7)**
+
+Site B joins after site A already holds the QM, so its peers start a **full** sync over `net-wan`. Provision must not report success until DR is actually in sync, and a stalled sync must fail, not hang. Add this test to `tests/test_pdrbd_dr_switch.py`:
+
+```python
+SITE = pathlib.Path("ansible/site-pdrbd.yml")
+
+
+def test_provision_waits_for_dr_sync_with_a_stall_window():
+    plays = yaml.safe_load(SITE.read_text())
+    names = [p.get("name", "") for p in plays]
+    site_b = next(i for i, n in enumerate(names) if "site B" in n and "volume" in n)
+    wait = next(i for i, n in enumerate(names) if "wait for DR sync" in n)
+    assert site_b < wait
+    body = str(plays[wait])
+    assert "pdrbd_sync_stall_secs" in body and "pdrbd_sync_max_secs" in body
+    assert "dr_enabled" in str(plays[wait]["tasks"][0].get("when", ""))
+```
+
+Then append to `ansible/site-pdrbd.yml`, after the site-B `pdrbd-qm` play (name that play `per-QM replicated volume (site B, DR secondary)` so the test can find it):
+
+```yaml
+# The DR receiver starts a FULL initial sync (site A already holds the QM). Watch it: log
+# progress, fail if the sync percentage does not advance within pdrbd_sync_stall_secs, and
+# fail outright past pdrbd_sync_max_secs — a stall is a failure, not a wait (spec §7).
+- name: wait for DR sync (every peer UpToDate), watched
+  hosts: "{{ groups['pdrbd_a'][0] }}"
+  become: true
+  vars:
+    pdrbd_res: "{{ qm_app | lower }}"
+    pdrbd_sync_stall_secs: 180
+    pdrbd_sync_max_secs: 3600
+  tasks:
+    - name: poll drbdadm status until all peers are UpToDate
+      ansible.builtin.shell: |
+        set -o pipefail
+        start=$(date +%s); last_pct=""; last_move=$start
+        while :; do
+          st=$(drbdadm status {{ pdrbd_res }})
+          if ! grep -Eq 'peer-disk:(Inconsistent|Outdated|DUnknown)|replication:(SyncSource|SyncTarget|WFBitMap)' <<<"$st"; then
+            echo "in-sync after $(( $(date +%s) - start ))s"; exit 0
+          fi
+          pct=$(grep -Eo 'done:[0-9.]+' <<<"$st" | sort -t: -k2 -n | head -1)
+          now=$(date +%s)
+          if [ "$pct" != "$last_pct" ]; then
+            echo "$(date -u +%H:%M:%S) sync ${pct:-pending}"; last_pct=$pct; last_move=$now
+          fi
+          if [ $(( now - last_move )) -ge {{ pdrbd_sync_stall_secs }} ]; then
+            echo "DR sync STALLED at ${pct:-pending} for {{ pdrbd_sync_stall_secs }}s" >&2; echo "$st" >&2; exit 1
+          fi
+          if [ $(( now - start )) -ge {{ pdrbd_sync_max_secs }} ]; then
+            echo "DR sync exceeded {{ pdrbd_sync_max_secs }}s" >&2; echo "$st" >&2; exit 1
+          fi
+          sleep 10
+        done
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: dr_enabled | default(true) | bool  # plays take no `when:`; gate the task
+```
+
+The resync buffers from `docs/reference/drbd-operations.md` (`max-buffers 80k`, `sndbuf-size 2M`, `rcvbuf-size 2M`, `c-plan-ahead 0`, `resync-rate 500M`) belong in the cross-site `connection { net { … } }` / `disk { … }` blocks of `qm.res.j2` unless the blueprint shows RDQM's own values — without them the #67 finding applies (~250 KB/s initial resync). Before relying on the `grep` patterns, run `drbdadm status <res>` during a live sync once and confirm the state words (`replication:SyncSource`, `done:`) for this DRBD 9 version.
+
 - [ ] **Step 6: Run tests; validate**
 
 Run: `uv run pytest tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py -v` — expected: PASS.
@@ -2099,7 +2191,7 @@ Filed with `vrg-issue-create --kind validation`, blocked-by Task 6 (and Task 3's
   3. `mqlab qm status pcmk-drbd-ubuntu`; `mqlab qm e2e pcmk-drbd-ubuntu`.
   4. `mqlab bootstrap pcmk-drbd-ubuntu` again (idempotency, Review Focus 3).
   5. `mqlab dr cutover pcmk-drbd-ubuntu --rpo0-drill`; `mqlab dr failback pcmk-drbd-ubuntu --rpo0-drill`.
-- **Acceptance:** step 2 succeeds in one pass; step 3 shows the promoted node, the group Started, all DRBD peers UpToDate, e2e green; step 4 reports no create-md/mkfs/crtmqm; step 5 succeeds both ways with the token found.
+- **Acceptance:** step 2 succeeds in one pass **and its transcript shows the watched DR-sync wait ending `in-sync after <n>s`** (record `n`); step 3 shows the promoted node, the group Started, all DRBD peers UpToDate, e2e green; step 4 reports no create-md/mkfs/crtmqm; step 5 succeeds both ways with the token found.
 - **Results template:** `Outcome: SUCCESS|FAILURE`, bootstrap transcript path, `qm status` output, e2e summary, the two dr outputs.
 
 ### Task 8 (validation): Drill set on `rdqm-rhel` and `pcmk-drbd-ubuntu`
