@@ -63,10 +63,12 @@ D (#311 docs) ──┬─▶ T1 capture playbook ─▶ T2 run capture + bluepr
 ### Task 1: Read-only RDQM blueprint capture playbook
 
 **Files:**
+
 - Create: `ansible/capture-rdqm-blueprint.yml`
 - Create: `tests/test_capture_rdqm_blueprint.py`
 
 **Interfaces:**
+
 - Consumes: the rendered lab inventory (`build/work/inventory.ini`, groups `rdqm_a`, `rdqm_b`); the RDQM app QM name (`RDQMAPP`, passed as `-e qm_name=…`).
 - Produces: a capture tree at `{{ blueprint_out }}/<host>/<item>.txt` for every host in `rdqm_a:rdqm_b`, where `blueprint_out` is passed by the operator (`-e blueprint_out=<abs path>`). Item names (stable; Task 2 commits them): `drbd-version`, `drbd-conf`, `drbd-dump`, `drbd-status`, `packages`, `pcmk-config`, `pcmk-status`, `ocf-agents`, `corosync-conf`, `quorum`, `vgs`, `lvs`, `mounts`, `lsblk`, `rdqm-ini`, `rdqmstatus-qm`, `rdqmstatus-group`, `units`, `mqs-ini`, `dspmqinf`.
 
@@ -355,12 +357,14 @@ vrg-commit --type feat --scope rdqm --message "read-only RDQM blueprint capture 
 ### Task 2: Run the capture; commit the blueprint; seed the deviation ledger; reconcile Tasks 5–6
 
 **Files:**
+
 - Create: `docs/reference/rdqm-blueprint/README.md`
 - Create: `docs/reference/rdqm-blueprint/<host>/<item>.txt` (copied from the capture, all 6 hosts)
 - Create: `docs/reference/rdqm-vs-vanilla-deviations.md`
 - Modify (`.github`): this plan's Tasks 5–6 hypothesis values, via a reconciliation comment on each filed issue (see Step 5)
 
 **Interfaces:**
+
 - Consumes: Task 1's playbook and item names.
 - Produces: the committed blueprint tree (Tasks 5, 6 and 9 cite it by path) and the ledger file with stable row IDs (`ST-n` storage, `RP-n` replication, `CL-n` cluster, `DR-n` disaster recovery, `TL-n` lifecycle tooling, `SC-n` replication security, `SP-n` support/installation) that Task 9 finalises.
 
@@ -391,6 +395,7 @@ Expected: no `SECRET LEAK`. Any keystore *path* reference (e.g. in `pcs config`)
 - [ ] **Step 3: Write `docs/reference/rdqm-blueprint/README.md`**
 
 Sections (each fact cites its file, e.g. `rdqm-a1/drbd-dump.txt`):
+
 1. **Provenance** — capture date, MQ level (`lab/mq-version`), RHEL point release, DRBD/Pacemaker/Corosync package versions from `packages.txt`, and the `drbd-version.txt` result. State explicitly whether the DRBD module is LINBIT DRBD 9 (resolves spec D2's judgment).
 2. **Storage** — VG name, LV(s) per QM (main + snapshot), sizes, filesystem type and mount options, mount path.
 3. **Replication** — DRBD resource name(s), per-connection protocol (HA peers vs DR peers), addresses/ports, `quorum`/`on-no-quorum`, `after-sb-*`, `fencing` policy, net/disk options; whether HA and DR are **one resource with per-connection protocols or separate resources**, and how DRBD quorum is scoped so one site can keep quorum.
@@ -435,6 +440,7 @@ vrg-commit --type docs --scope rdqm --message "RDQM blueprint capture and deviat
 ### Task 3: DRBD 9 baked box (`pdrbd`)
 
 **Files:**
+
 - Create: `ansible/roles/drbd9/defaults/main.yml`
 - Create: `ansible/roles/drbd9/tasks/main.yml` (configure half)
 - Create: `ansible/roles/drbd9/tasks/install.yml` (install half, baked)
@@ -444,6 +450,7 @@ vrg-commit --type docs --scope rdqm --message "RDQM blueprint capture and deviat
 - Test: `tests/test_drbd9_role.py`
 
 **Interfaces:**
+
 - Consumes: the `bake` host inventory (`inventory/bake-host.ini`), `mq-install`, the bake-time roles `bake-pcmk-ubuntu.yml` uses.
 - Produces: box role `pdrbd` (catalog `roles.pdrbd.bake.ubuntu = pdrbd-ubuntu`); role `drbd9` with vars `drbd9_vg` (default `drbdpool`) and `drbd9_disk` (default `/dev/vdb`); on a booted node, `drbd9` configure guarantees the loaded `drbd` module is 9.x and the VG exists.
 
@@ -670,6 +677,7 @@ vrg-commit --type feat --scope bake --message "pdrbd box: LINBIT DRBD 9 (drbd-dk
 ### Task 4: Topology — the `pcmk-drbd-ubuntu` stack
 
 **Files:**
+
 - Modify: `lab/topology.yaml` (nodes, groups, stack)
 - Modify: `lab/versions.yaml` (`stacks:` entry)
 - Modify: `src/mqlab/stacks.py` (`_MECH_LABEL`)
@@ -678,6 +686,7 @@ vrg-commit --type feat --scope bake --message "pdrbd box: LINBIT DRBD 9 (drbd-dk
 - Test: `tests/test_topology_pdrbd.py` (create), `tests/test_stacks.py` (dashboard folder), `tests/test_parity.py`, `tests/test_watcherboard.py`
 
 **Interfaces:**
+
 - Consumes: box role `pdrbd` (Task 3).
 - Produces: stack `pcmk-drbd-ubuntu` — `mechanism: pacemaker-drbd`, `short: PDRBD` (QM `PDRBDAPP`), `cluster_group: pdrbd_a`, `groups: [pdrbd_a, pdrbd_b]`, `dr_groups: [pdrbd_b]`, `provision: ansible/site-pdrbd.yml`, `qm: {vip: 10.10.1.170, vip_b: 10.10.2.170}`, verbs below. Groups `pdrbd_a = [pdrbd-a1, pdrbd-a2, pdrbd-a3]`, `pdrbd_b = [pdrbd-b1, pdrbd-b2, pdrbd-b3]`. Hosts' hb IPs `172.16.1.71-73` / `172.16.2.81-83` (Tasks 5–6 use them). DNS names derive automatically: `pdrbd-vip-a.client.com`, `pdrbd-vip-b.client.com`.
 
@@ -942,6 +951,7 @@ vrg-commit --type feat --scope topology --message "pcmk-drbd-ubuntu stack: nodes
 ### Task 5: Site-A HA formation (`pdrbd-qm`) + the distributed workload
 
 **Files:**
+
 - Create: `ansible/roles/pdrbd-qm/defaults/main.yml`
 - Create: `ansible/roles/pdrbd-qm/templates/qm.res.j2`
 - Create: `ansible/roles/pdrbd-qm/tasks/main.yml`
@@ -952,6 +962,7 @@ vrg-commit --type feat --scope topology --message "pcmk-drbd-ubuntu stack: nodes
 - Test: `tests/test_pdrbd_qm_role.py`
 
 **Interfaces:**
+
 - Consumes: Task 3 `drbd9` (VG `drbdpool`), Task 4 stack/groups/hb IPs, `pcmk-cluster` (vars `pcmk_cluster_name`, `pcmk_site_nodes`), `mq-install`, `mq-authz-accounts`, `mq-diag-logging`, `mq-event-monitor`, `pki-distribute`, `site-distributed-shared.yml`; provision-phase extra-vars `qm_app`, `qm_svc`, `chl_to_svc`, `chl_to_app`, `svc_req_queue`.
 - Produces: per-QM resource `{{ qm_name | lower }}` (DRBD device `/dev/drbd{{ pdrbd_minor }}`, LV `drbdpool/{{ qm_name | lower }}`, mount `/var/mqm/vols/{{ qm_name | lower }}`); Pacemaker resources `drbd_qm` (promotable clone `drbd_qm-clone`) and group `mq_group` = `mq_fs` → `mq_vip` → `mq_qm`; role vars `pdrbd_site_group` (`pdrbd_a`/`pdrbd_b`) and `pdrbd_peers` (list of `{name, addr_hb, addr_wan, node_id, site}`) consumed again by Task 6.
 
@@ -1561,12 +1572,14 @@ vrg-commit --type feat --scope pdrbd --message "site-A HA: RDQM-style per-QM DRB
 ### Task 6a: `mqlab dr` dispatches on stack DR verbs; `--rpo0-drill` generalised
 
 **Files:**
+
 - Modify: `src/mqlab/cli.py` (`_dr_run` and helpers, around `_RDQM_DR_CUTOVER_SCRIPT`)
 - Modify: `lab/topology.yaml` (`rdqm-rhel` verbs: add `dr-cutover` / `dr-failback`)
 - Modify: `tests/test_cli_dr.py`
 - Modify: `docs/site/docs/operate/index.md` (the `mqlab dr` usage)
 
 **Interfaces:**
+
 - Consumes: `Stack.verbs` (raw dict), `lab_script()`, `repo_root()`, `_render_inventory`, `build_deps`, `run_steps`.
 - Produces: verb contract for `dr-cutover` / `dr-failback`: a mapping with exactly one kind key — `script: <lab/scripts name>` (run as `bash <script> <a2b|b2a> <QM>`, `RPO0_DRILL=1` in env when drilling) or `playbook: <ansible/ name>` (run as `ansible-playbook <pb> -e dr_direction=<a2b|b2a> -e qm_name=<QM> -e rpo0_drill=<true|false>` from `ansible/`) — plus optional `rpo0: true` declaring that the implementation performs the RPO-0 seed/verify. Task 6 relies on the playbook form and its three extra-vars.
 
@@ -1776,6 +1789,7 @@ vrg-commit --type feat --scope dr --message "mqlab dr dispatches on each stack's
 ### Task 6: DR — site B joins; operator-driven cutover/failback playbook
 
 **Files:**
+
 - Create: `ansible/_pdrbd-dr-replication.yml`
 - Create: `ansible/site-pdrbd-dr-switch.yml`
 - Create: `ansible/tasks/rpo0-drill-seed.yml`, `ansible/tasks/rpo0-drill-verify.yml`
@@ -1785,6 +1799,7 @@ vrg-commit --type feat --scope dr --message "mqlab dr dispatches on each stack's
 - Test: `tests/test_pdrbd_dr_switch.py`, `tests/test_pdrbd_qm_role.py`, `tests/test_topology_pdrbd.py`
 
 **Interfaces:**
+
 - Consumes: Task 5 role `pdrbd-qm` and its vars (`pdrbd_peers`, `pdrbd_site_group`, resource `drbd_qm`, group `mq_group`); Task 6a extra-vars `dr_direction`, `qm_name`, `rpo0_drill`.
 - Produces: `site-pdrbd-dr-switch.yml` honoring `dr_direction` (`a2b`|`b2a`), `rpo0_drill` (bool), and `dr_force` (bool, default false — forced DR only); the shared RPO-0 task files (inputs `rpo0_node`, `qm_name`; seed sets fact `rpo0_token`).
 
@@ -2214,11 +2229,13 @@ Filed with `--kind validation`, blocked-by Task 7. Arms run **one at a time** (b
 ### Task 9: Comparison report, finalized ledger, accurate parity matrix
 
 **Files:**
+
 - Create: `docs/reports/<YYYY-MM-DD>-rdqm-vs-pacemaker-drbd-comparison.md`
 - Modify: `docs/reference/rdqm-vs-vanilla-deviations.md` (no `pending` rows remain)
 - Modify: `src/mqlab/parity.py`, `tests/test_parity.py` (both rows from evidence)
 
 **Interfaces:**
+
 - Consumes: the Task 8 results comment (both arms), the ledger, the blueprint.
 
 - [ ] **Step 1: Parity rows from evidence (failing test first)**
@@ -2253,6 +2270,7 @@ vrg-commit --type docs --scope report --message "RDQM vs pacemaker-drbd comparis
 ### Task 10: `pacemaker-san` decision
 
 **Files:**
+
 - Create: `docs/reports/<YYYY-MM-DD>-pacemaker-san-decision.md`
 
 - [ ] **Step 1: Draft the options with evidence** — (a) retire `pcmk-ubuntu`/`pacemaker-san` from this lab; (b) keep it as a demoted, non-co-maintained contrast arm; (c) extract the reusable SAN pieces (`iscsi-target`, `iscsi-initiator`, `drbd-san`, the `san` box) for a future database-resiliency lab, then retire here. For each: what it removes or keeps (roles, boxes, networks, topology entries, docs), maintenance and cold-rebuild cost, and what Task 9's report says the SAN arm still demonstrates.
