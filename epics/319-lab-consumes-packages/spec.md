@@ -70,7 +70,7 @@ component in the lab so the two tiers are visible side by side.
 | D4 | **The paths visible from outside are aligned across tiers:** `/opt/logical-minds-foundry/<name>/venv` (what units call) and `/etc/logical-minds-foundry/<name>/` (deployer config). The in-lab tier keeps `releases/` behind the `venv` symlink. Extraction changes only how a component is installed. |
 | D5 | **Packages come straight from the published repositories, with exact versions pinned** in `lab/versions.yaml`. The pins feed the box manifest hash. |
 | D6 | **No dev override for extracted components:** release-to-test. Post-extraction products are expected to be largely in maintenance mode. The pre-release channel is `vergil-project/.github#370` (deferred). |
-| D7 | **Trust anchors are per-user config, never code:** `~/.config/vergil/package-trust.toml` (the `authorized_keys` analogy). The lab commits only which orgs and packages it consumes. A missing anchor fails loudly. |
+| D7 | **Trust anchors are per-user config, never code:** `~/.config/vergil/package-trust.toml` (the `authorized_keys` analogy), authored on the host with vergil-tooling and synced into VMs. The lab commits only which orgs and packages it consumes. A missing anchor fails loudly. |
 | D8 | **Registering logical-minds-foundry in vergil-tooling `orgs.py` is interim (tactical).** The follow-on `#321` brainstorms a config-driven registry rooted at `~/.config/vergil/`. |
 | D9 | **Versions:** `0.2.x` while the lab dogfoods the product, then `1.0.0` after M3's validations (the extraction roadmap's "1.0 only after the lab dogfoods it" rule). |
 
@@ -158,11 +158,16 @@ tasks):
 
   `runtime.python` (the tarball pin) is removed. `versions.py` validates the block eagerly.
 - **Trust anchors:** `~/.config/vergil/package-trust.toml`, with one entry per org (its
-  primary fingerprint).
-  - `mqlab package trust add <org> <fingerprint>` and `mqlab package trust list` write and
-    show it.
+  primary fingerprint). The file is **authored on the host, owned by vergil-tooling**,
+  and synced into VMs by TRUST-SYNC (below). The lab is only one consumer of package
+  trust, so the anchors belong to the user's Vergil config, not to the lab.
+  - On the host, `vrg-package trust add <org> <fingerprint>` and `vrg-package trust list`
+    write and show it (TRUST-SYNC).
+  - In the lab, `mqlab package trust list` is **read-only**: it shows the synced anchors
+    and which orgs the lab needs.
   - `mqlab` passes the anchors to Ansible. A missing file or entry **fails before anything
-    is trusted**, naming the file, the org and the command. There is no fallback.
+    is trusted**, naming the file, the org, the host command (`vrg-package trust add`)
+    and the sync step (re-enter with `vrg-vm session`). There is no fallback.
 - **The `package-repos` role (new)** uses the **standard third-party repository recipe**
   (the one vendors such as Docker and HashiCorp document), with the fingerprint check
   automated. For each org it:
@@ -183,11 +188,16 @@ tasks):
     signed repository). The orgs still publish it for consumers who want it. Rotation is
     deferred to the holistic strategy in `#324`; under D7 a new primary key needs a new
     anchor anyway.
-- **TRUST-SYNC (cross-org, vergil-tooling):** `vrg-vm` carries
-  `~/.config/vergil/package-trust.toml` from the host into each VM it creates or starts,
-  alongside the identities and credentials, so it survives `vrg-vm rebuild`. Until it
-  lands, the file must be re-added after a dev-VM rebuild. The failure message names the
-  command.
+- **TRUST-SYNC (cross-org, vergil-tooling)** has two parts:
+  - **`vrg-package trust add|list`** on the host writes and shows
+    `~/.config/vergil/package-trust.toml`. It validates the 40-hex fingerprint and refuses
+    to silently replace an existing anchor; replacing one is an explicit `--replace`.
+  - **`vrg-vm` mirrors the host file into the VM** on create, start, rebuild and restart
+    (the credentials stage) and on every `vrg-vm session` entry. If the host has no file,
+    the VM copy is removed; the host is authoritative.
+
+  Until TRUST-SYNC is released, the file can be written by hand in the VM; it does not
+  survive a dev-VM rebuild.
 
 ### 5.4 Lab: consuming the extracted component
 
@@ -223,8 +233,9 @@ tasks):
 - `component-install` builds the venv on `/opt/vergil/python/3.14.8/bin/python3.14`
   (installed by `package-repos` plus the pinned `vergil-python3.14.8`). The `releases/`
   layout, atomic flip, both selfchecks and pruning are unchanged.
-- **`runtime-install` is retired**, along with `/opt/vergil/cpython-3.14/`, which the roles
-  remove from guests. Config moves to `/etc/logical-minds-foundry/mq-resiliency-clients/`.
+- **`runtime-install` is retired**, along with `/opt/vergil/cpython-3.14/`. Nothing removes
+  it in place: M1 → M3 is a cold rebuild (§5.4), so fresh boxes never carry it. Config
+  moves to `/etc/logical-minds-foundry/mq-resiliency-clients/`.
 - `mqlab component build` tests on the same pinned runtime build. How the dev VM obtains
   it (the `vergil-python` package vs the python-build-standalone tarball, which are the
   same bytes) is decided in the plan, keeping "tested on = deployed on".
@@ -258,14 +269,14 @@ tasks):
 | OP1 | Key ceremony and trust roots | deployment (human-attested) | LMF `.github` | D |
 | KR/PUB | Packages repo (`publish-index`) and keyring package | code | `logical-minds-foundry/packages` | OP1 |
 | REG ⟂ | Interim `orgs.py` entry + release | code + human-gated release | vergil-tooling | OP1 |
-| TRUST-SYNC ⟂ | `vrg-vm` syncs `package-trust.toml` into VMs + release | code + human-gated release | vergil-tooling | D |
+| TRUST-SYNC ⟂ | `vrg-package trust add\|list` on the host; `vrg-vm` mirrors `package-trust.toml` into VMs; release | code + human-gated release | vergil-tooling | D |
 | X1 | Import (overwrite) + Vergil scaffolding | code | `mq-resiliency-observability` | D |
 | X2 | Release `0.2.0`, confirmed in the LMF repo | deployment (release human-gated) | `mq-resiliency-observability` | X1, REG, KR/PUB |
-| L1 | Trust and repos (`mqlab package trust`, `packages:`, `package-repos`) | code | lab | D |
+| L1 | Trust and repos (`mqlab package trust list`, `packages:`, `package-repos`) | code | lab | D |
 | L2 | In-lab tier on `vergil-python3.14.8`; retire `runtime-install`; `/etc/logical-minds-foundry` | code | lab | L1 |
 | L3 | Observability from the package; remove the in-lab copy (same PR) | code | lab | L1, X2 |
 | V1 | Cold rebuild, macOS arm64 (`nativeha-ubuntu` on `ubuntu:24` must pass; `pcmk-ubuntu`, whose SAN nodes run the `ubuntu:26` infra OS, best effort) | validation | lab | L2, L3, TRUST-SYNC |
-| V2 | Cold rebuild, x86 cloud (`nativeha-rhel-crr` on `rhel:10` must pass; `rdqm-rhel` on `rhel:9` best effort) | validation | lab | L2, L3 |
+| V2 | Cold rebuild, x86 cloud (`nativeha-rhel-crr` on `rhel:10` must pass; `rdqm-rhel` on `rhel:9` best effort) | validation | lab | L2, L3, TRUST-SYNC |
 | X3 | Release `1.0.0`; bump the lab pin; reprovision check | deployment + code | product + lab | V1, V2 |
 | — | Documentation review (multi-repo sweep) | bookend | lab (`#1444`) | X3 |
 | — | Follow-on brainstorm: config-driven org registry | bookend | LMF `.github` (`#321`) | X3 |
@@ -321,4 +332,5 @@ Each cold rebuild checks the following:
 | M2's consumer bootstrap (`repo_setup.bootstrap`) is Python in vergil-tooling, takes its fingerprint only from `orgs.py`, and exists to bootstrap the keyring package | **data** (`repo_setup.py:231-308`) | L1 uses the standard recipe instead (§5.3) |
 | The standard recipe, without the keyring package, costs the lab little: same-primary key changes are re-fetched each run, and a new primary needs a new anchor under D7 anyway | **judgment** | `#324` revisits it holistically |
 | M2 install-tests every target cell (install, unit verify, smoke, purge, residue) | **data** (vergil-tooling `install_test.py:1-21`) | §7 coverage note |
-| `vrg-vm` can be taught to sync one more `~/.config/vergil` file | **judgment** (it already injects identities and credentials) | TRUST-SYNC |
+| `vrg-vm` can be taught to sync one more `~/.config/vergil` file | **data**: the credentials stage (`vrg_vm.py:629-631`, in the create/start/rebuild stage lists and the cloud create list), `_cmd_restart` (`:1192`) and `_cmd_session` (`:2570`, which already copies Claude config on every entry) all have a guest transport | TRUST-SYNC |
+| The anchors must be authored on the host: `mqlab` runs only inside the disposable dev VM, while `vrg-vm` reads `~/.config/vergil` on the host (as it does `identities.toml`) | **data** (found while planning, 2026-10-12; human chose host-side authoring) | D7, TRUST-SYNC |
