@@ -5,7 +5,8 @@
 - **Origin:** follow-on brainstorm `.github#296` (epic `.github#294`, M1)
 - **Builds on:** M1 `logical-minds-foundry/.github#294` (in-lab components);
   M2 `vergil-project/.github#356` (binary package publishing)
-- **Follow-on (seeded):** `.github#321`, a config-driven package-org registry
+- **Follow-ons (seeded):** `.github#321`, a config-driven package-org registry;
+  `.github#324`, a holistic key and credential rotation strategy
 - **Member repos:** `logical-minds-foundry/mq-resiliency-lab-for-linux`,
   `logical-minds-foundry/mq-resiliency-observability`,
   `logical-minds-foundry/packages` (new); cross-org `vergil-project/vergil-tooling`
@@ -147,9 +148,9 @@ tasks):
 
   ```yaml
   packages:
-    repos:                         # org -> keyring package (NO fingerprints: D7)
-      vergil:                { keyring: vergil-archive-keyring }
-      logical-minds-foundry: { keyring: logical-minds-foundry-archive-keyring }
+    repos:                         # org -> repository URL (NO fingerprints: D7)
+      vergil:                { url: "https://vergil-project.github.io/packages" }
+      logical-minds-foundry: { url: "https://logical-minds-foundry.github.io/packages" }
     pins:
       vergil-python3.14.8:         "3.14.8+20261003-1"
       mq-resiliency-observability: "0.2.0-1"
@@ -162,12 +163,26 @@ tasks):
     show it.
   - `mqlab` passes the anchors to Ansible. A missing file or entry **fails before anything
     is trusted**, naming the file, the org and the command. There is no fallback.
-- **The `package-repos` role (new):**
-  - installs each org's keyring package;
-  - **verifies the key against the anchor before trusting it**, mirroring M2's bootstrap
-    verification;
-  - adds the apt source or yum `.repo`;
-  - fails loudly on any mismatch.
+- **The `package-repos` role (new)** uses the **standard third-party repository recipe**
+  (the one vendors such as Docker and HashiCorp document), with the fingerprint check
+  automated. For each org it:
+  1. fetches the org's published key, `<url>/keys/<org>.asc`, over HTTPS (on every run,
+     so a re-published key under the same primary is picked up);
+  2. **verifies the key's primary fingerprint against the per-user anchor before writing
+     any repository source**, and fails loudly on a mismatch;
+  3. installs the verified key as the repository's key file and adds the apt source
+     (`signed-by`) or yum `.repo` (`gpgkey`, `gpgcheck=1`, `repo_gpgcheck=1`).
+
+  Ansible's native modules do this where they can (the plan confirms which, e.g.
+  `rpm_key`'s fingerprint check, `deb822_repository`, `yum_repository`). A re-run on a
+  host that is already trusted changes nothing, and a structural test pins "verify before
+  any source is written".
+  - **The lab does not install `<org>-archive-keyring`.** That package is an optional
+    convention for delivering key rotation through package updates, and it is what forces
+    M2's consumer bootstrap into a temporary-source dance (the keyring lives inside the
+    signed repository). The orgs still publish it for consumers who want it. Rotation is
+    deferred to the holistic strategy in `#324`; under D7 a new primary key needs a new
+    anchor anyway.
 - **TRUST-SYNC (cross-org, vergil-tooling):** `vrg-vm` carries
   `~/.config/vergil/package-trust.toml` from the host into each VM it creates or starts,
   alongside the identities and credentials, so it survives `vrg-vm rebuild`. Until it
@@ -178,7 +193,14 @@ tasks):
 
 - **Install:** an `apt`/`dnf` install of the **exact pinned version** (the pinned runtime
   comes in as a dependency) at **bake**, and again at **provision**. That makes a pin bump
-  plus provision a valid upgrade path without a rebake.
+  plus provision a valid upgrade path without a rebake, **from the first packaged install
+  onward**.
+- **M1 → M3 is a cold rebuild, never an in-place upgrade.** On an M1 host,
+  `/opt/logical-minds-foundry/mq-resiliency-observability/venv` is a symlink into
+  `releases/<id>/venv`; `dpkg`/`rpm` would follow it and write the package's files into
+  the old release directory. So provision **refuses** to install the package over an
+  in-lab layout (a `venv` symlink or a `releases/` directory) and names
+  `mqlab box build`. Fresh M3 boxes never carry that layout.
 - **Roles** `cluster-state`, `nativeha-state`, `rdqm-state`:
   - the "baked?" check becomes **"the installed version equals the pin"**
     (`dpkg-query -W`/`rpm -q`), failing with a message that names `mqlab box build` or the
@@ -190,10 +212,9 @@ tasks):
   `lab/versions.yaml` distinguishes packaged components from in-lab ones (form decided
   in the plan).
 - **Removal:** `components/mq-resiliency-observability` leaves the lab **in the same PR**
-  that switches the roles to the package. The roles remove the old in-lab
-  `releases/`-layout observability install and the old `/etc/opt/…` env files from
-  guests. `components/README.md` gains an "extracted components" note naming the product
-  repo.
+  that switches the roles to the package. The roles do not migrate old in-lab installs in
+  place (see the cold-rebuild rule above). `components/README.md` gains an "extracted
+  components" note naming the product repo.
 - **`mqlab component install <extracted>`** refuses, naming the real path: bump the pin,
   then provision or rebake.
 
@@ -224,6 +245,8 @@ tasks):
   version that differs from the pin each **fail loudly** with the fix named (an `mqlab`
   command, the config file, or the pin). There are no fallbacks: never to an unsigned
   repo, an unpinned version, or the retired tarball runtime.
+- An in-lab layout where the package would install refuses the install and names
+  `mqlab box build` (§5.4).
 - A packaged install that fails at bake fails the bake. At provision it fails the play,
   and the previous package version keeps running (package-manager atomicity).
 
@@ -241,11 +264,12 @@ tasks):
 | L1 | Trust and repos (`mqlab package trust`, `packages:`, `package-repos`) | code | lab | D |
 | L2 | In-lab tier on `vergil-python3.14.8`; retire `runtime-install`; `/etc/logical-minds-foundry` | code | lab | L1 |
 | L3 | Observability from the package; remove the in-lab copy (same PR) | code | lab | L1, X2 |
-| V1 | Cold rebuild, macOS arm64 (`nativeha-ubuntu` must pass; `pcmk-ubuntu` best effort) | validation | lab | L2, L3, TRUST-SYNC |
-| V2 | Cold rebuild, x86 cloud (`nativeha-rhel-crr` must pass; `rdqm-rhel` best effort) | validation | lab | L2, L3 |
+| V1 | Cold rebuild, macOS arm64 (`nativeha-ubuntu` on `ubuntu:24` must pass; `pcmk-ubuntu`, whose SAN nodes run the `ubuntu:26` infra OS, best effort) | validation | lab | L2, L3, TRUST-SYNC |
+| V2 | Cold rebuild, x86 cloud (`nativeha-rhel-crr` on `rhel:10` must pass; `rdqm-rhel` on `rhel:9` best effort) | validation | lab | L2, L3 |
 | X3 | Release `1.0.0`; bump the lab pin; reprovision check | deployment + code | product + lab | V1, V2 |
 | — | Documentation review (multi-repo sweep) | bookend | lab (`#1444`) | X3 |
 | — | Follow-on brainstorm: config-driven org registry | bookend | LMF `.github` (`#321`) | X3 |
+| — | Follow-on brainstorm: holistic key and credential rotation | bookend | LMF `.github` (`#324`) | X3 |
 | — | Retrospective | terminal | LMF `.github` (`#322`) | all |
 
 ⟂ marks a cross-org task, filed in vergil-project/vergil-tooling. It is not a GitHub
@@ -253,6 +277,12 @@ sub-issue of `#319`: the epic body lists it, and dependent tasks carry dependenc
 
 L3 switches observability to the package in a single PR, so develop is never left
 without a working observability install (unlike `#294`'s T6–T9 chain).
+
+Live validation proves the must-pass OS for each arm (`ubuntu:24` arm64, `rhel:10`
+x86_64). Package-level coverage of every target (Ubuntu 24/26 and RHEL 9/10, both arches)
+comes from M2's per-target install test in the product's release pipeline: install,
+`systemd-analyze verify` on the shipped units, the smoke command, purge, and a residue
+check (vergil-tooling `install_test.py`).
 
 ## 8. Validation
 
@@ -265,7 +295,7 @@ Each cold rebuild checks the following:
   `/etc/opt/logical-minds-foundry` are absent everywhere.
 - `mqlab component status` shows both tiers correctly.
 - With a trust anchor removed, `mqlab` fails **before** trusting any repository, and names
-  the fix.
+  the fix. With a wrong anchor, `package-repos` fails before writing any repository source.
 - The bootstrap succeeds in one pass. Native HA stacks must pass; RDQM and Pacemaker are
   best effort.
 
@@ -275,6 +305,8 @@ Each cold rebuild checks the following:
 - **`vergil-project/.github#356` (M2):** M3 is its first external-org consumer.
 - **`vergil-project/.github#370`:** the pre-release channel (deferred).
 - **`#321`:** the config-driven registry, which removes REG's interim code entry.
+- **`#324`:** the holistic key and credential rotation strategy, which decides whether
+  the lab should adopt keyring packages (or an equivalent) after all.
 - **`#300` (pymqi → `ibmmq`):** independent. Clients stay in-lab either way.
 
 ## 10. Risks, data and judgment
@@ -286,5 +318,7 @@ Each cold rebuild checks the following:
 | `orgs.py` registers only `vergil`; an unknown vendor is fatal | **data** (`orgs.py:27-44`) | REG |
 | M2's python builder can ship systemd units through the nfpm overlay and run a smoke command for a library-style product repo | **judgment** | the plan's first step verifies it against vergil-tooling and the #356 docs |
 | vergil's keyring package and packages repo can be mirrored for a second org without vergil-tooling changes beyond REG | **judgment** | the plan's first step reads OP1, P1 and DEP1 from #356 |
-| M2's consumer bootstrap verifies a keyring against a pinned fingerprint in a form the lab can reuse with config-supplied anchors | **judgment** | L1 |
+| M2's consumer bootstrap (`repo_setup.bootstrap`) is Python in vergil-tooling, takes its fingerprint only from `orgs.py`, and exists to bootstrap the keyring package | **data** (`repo_setup.py:231-308`) | L1 uses the standard recipe instead (§5.3) |
+| The standard recipe, without the keyring package, costs the lab little: same-primary key changes are re-fetched each run, and a new primary needs a new anchor under D7 anyway | **judgment** | `#324` revisits it holistically |
+| M2 install-tests every target cell (install, unit verify, smoke, purge, residue) | **data** (vergil-tooling `install_test.py:1-21`) | §7 coverage note |
 | `vrg-vm` can be taught to sync one more `~/.config/vergil` file | **judgment** (it already injects identities and credentials) | TRUST-SYNC |
