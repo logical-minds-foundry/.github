@@ -274,7 +274,7 @@ tasks):
 | X2 | Release `0.2.0`, confirmed in the LMF repo | deployment (release human-gated) | `mq-resiliency-observability` | X1, REG, KR/PUB |
 | L1 | Trust and repos (`mqlab package trust list`, `packages:`, `package-repos`) | code | lab | D |
 | L2 | In-lab tier on `vergil-python3.14.8`; retire `runtime-install`; `/etc/logical-minds-foundry` | code | lab | L1 |
-| L3 | Observability from the package; remove the in-lab copy (same PR) | code | lab | L1, X2 |
+| L3 | Observability from the package; remove the in-lab copy (same PR) | code | lab | L2, X2 |
 | V1 | Cold rebuild, macOS arm64 (`nativeha-ubuntu` on `ubuntu:24` must pass; `pcmk-ubuntu`, whose SAN nodes run the `ubuntu:26` infra OS, best effort) | validation | lab | L2, L3, TRUST-SYNC |
 | V2 | Cold rebuild, x86 cloud (`nativeha-rhel-crr` on `rhel:10` must pass; `rdqm-rhel` on `rhel:9` best effort) | validation | lab | L2, L3, TRUST-SYNC |
 | X3 | Release `1.0.0`; bump the lab pin; reprovision check | deployment + code | product + lab | V1, V2 |

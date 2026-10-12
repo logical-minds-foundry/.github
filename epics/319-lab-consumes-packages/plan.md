@@ -266,12 +266,8 @@ created by OP1). Reference: `vergil-project/packages`, checked out read-only at
   then run `vrg-pr-workflow report-ready`.
 - **After merge (human-gated release):** the human releases `v1.0.0` from `main`. The release
   dispatches `publish-index`.
-- **Acceptance:** after the release, all three succeed:
-  - `curl -fsSL https://logical-minds-foundry.github.io/packages/keys/logical-minds-foundry.asc`
-  - `.../deb/dists/noble/InRelease`
-  - `.../rpm/el9/x86_64/repodata/repomd.xml.asc`
-
-  Record the output on the task.
+- **Closes on merge.** Whether the release actually published is checked by X2's
+  preconditions, the first step that needs it deployed.
 
 ---
 
@@ -564,7 +560,11 @@ dependency note on REG (cross-org).
 - **Preconditions (machine-checkable):**
   1. REG's vergil-tooling release is the one the release container uses. Check that the
      `cd-release` run log's `vrg-version` line is ≥ REG's release.
-  2. The LMF key URL returns 200.
+  2. KR/PUB's `v1.0.0` release published the LMF index. All three of these succeed:
+     - `curl -fsSL https://logical-minds-foundry.github.io/packages/keys/logical-minds-foundry.asc`
+       (its primary fingerprint equals OP1's);
+     - `.../deb/dists/noble/InRelease`;
+     - `.../rpm/el9/x86_64/repodata/repomd.xml.asc`.
 - **Human-gated:** the human cuts `v0.2.0` from `main`. The agent never does.
 - **Procedure (agent):** wait for the `package-index` stage. Then confirm the package is on
   the index:
@@ -1309,7 +1309,14 @@ observability install.
   - `docs/site/docs/operate/guest-components.md`: the two tiers, `component status` tiers,
     and how to upgrade the packaged product;
   - `docs/development/box-bake-manifest.md` and `docs/development/box-model.md`: the
-    observability lines.
+    observability lines;
+  - **the package-index rule** in `docs/development/box-model.md:219-221` and
+    `components/README.md`. Both say guest-component installs "never consult a package
+    index". Rewrite them to the two-tier rule: in-lab components never consult an index
+    (unchanged), while packaged components install from their org's signed repository at
+    bake and provision. That needs the guest's outbound access through the vagrant-libvirt
+    management NAT (`lab/networks/vagrant-libvirt.xml`), and the repositories are trusted
+    only after the fingerprint check against the per-user anchors.
 
   The doc review (#1444) sweeps the rest.
 
@@ -1446,8 +1453,10 @@ on TRUST-SYNC.
        `/etc/apt/sources.list.d/logical-minds-foundry.sources` change happens.
      - Restore the anchor afterwards.
   8. **Pin downgrade/upgrade path:** set the observability pin to a version that doesn't
-     exist (`0.2.0-9`). Provision fails, naming `lab/versions.yaml packages.pins`. Restore
-     the pin; provision is green with `changed=0` on the package tasks.
+     exist (`0.2.0-9`). Provision fails, naming `lab/versions.yaml packages.pins`, and the
+     installed `0.2.0-1` keeps running: the collector series keep arriving in Prometheus
+     during and after the failed play (spec §6). Restore the pin; provision is green with
+     `changed=0` on the package tasks.
 - **Acceptance:** the must-pass row is green. Record `Outcome: SUCCESS` with the best-effort
   row's outcome noted.
 
