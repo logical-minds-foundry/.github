@@ -32,7 +32,9 @@ client SDK).
 **Repos:**
 
 - Implementation, guard and validation: `logical-minds-foundry/mq-resiliency-lab-for-linux`.
-- One comment: `logical-minds-foundry/mq-resiliency-observability`.
+- **Not** the separate `mq-resiliency-observability` repo. It is the on-hold
+  extraction target of epic `.github#319`. The lab's observability component lives
+  in-repo under `components/mq-resiliency-observability/`, and T2 covers it.
 - This plan, the spec, the outreach and the retrospective: `logical-minds-foundry/.github`.
 
 ## Global Constraints
@@ -99,15 +101,14 @@ client SDK).
 ```text
 T1  docs: spec + plan (.github#301)                        [—]
 T2  big-bang migration (lab#1360)                          [T1]
-T3  obs pyproject comment (obs#42)                         [—]
-T4  outreach: aarch64 wheel (.github#302)                  [—]
+T4  outreach: aarch64 wheel (.github#302) — deferred      [V1]
 V1  validation: rebake + cold rebuild, ARM64 + x86_64
-    (lab#1362)                                             [T2, T3]
+    (lab#1362)                                             [T2]
 Closing  docs review (lab#1361) [V1] · follow-on brainstorm (.github#303) [V1]
          · retrospective (.github#304) [all]
 ```
 
-T2, T3 and T4 can run in parallel once T1 merges. T3 and T4 do not need T1.
+T2 starts once T1 merges. There is no T3: the observability-repo comment task was dropped as out of scope. T4 is deferred to the end of the epic (see its section).
 
 ---
 
@@ -657,28 +658,14 @@ component gate (`mqlab component build`) needs a clean tree.
 
 ---
 
-## Task T3: Observability repo comment (`mq-resiliency-observability#42`)
-
-**Files:** Modify `pyproject.toml:7-8` in `logical-minds-foundry/mq-resiliency-observability`.
-
-- [ ] **Step 1:** Create the worktree `.worktrees/issue-42-drop-pymqi-mention` on
-  `feature/42-drop-pymqi-mention`, in that repo's checkout.
-- [ ] **Step 2:** Replace the two comment lines with:
-
-  ```toml
-  # Runtime is stdlib-only by design: the collectors deploy verbatim onto MQ nodes
-  # and must not drag an MQ client library or any third-party wheel onto a production host.
-  ```
-
-- [ ] **Step 3:** `grep -rni pymqi .` in that repo prints nothing outside its own
-  historical docs, if it has any. `vrg-container-run -- vrg-validate` passes.
-- [ ] **Step 4:** `vrg-commit --type docs --scope pyproject --message "drop the pymqi mention from the stdlib-only runtime comment"`, then `vrg-pr-workflow report-ready`.
-
----
-
 ## Task T4: Outreach, a Linux aarch64 wheel (`.github#302`)
 
-This task has no code. Per the issue body:
+This task has no code. **Deferred to the end of the epic** (human decision,
+2026-10-13). Do not send anything before V1 passes. The aarch64 gap may instead be
+closed by local, private wheel builds, which the human is considering as general
+infrastructure. At the end of the epic, the human decides between the steps below
+and closing #302 in favour of local builds. The draft messages are saved as a
+comment on #302.
 
 - [ ] **Step 1:** Draft two messages for the human.
   - **(a) A public issue for `ibm-messaging/mq-mqi-python`.** Title: "Publish a
@@ -706,11 +693,11 @@ This task has no code. Per the issue body:
 ## Operational V1 (validation): rebake + cold rebuild, ARM64 + x86_64 (`mq-resiliency-lab-for-linux#1362`)
 
 This issue already exists. Its body is rewritten to this section when T1 publishes.
-It is blocked by `lab#1360` and `obs#42`.
+It is blocked by `lab#1360`.
 
 **Preconditions, a self-check run first:**
 
-- **Probe:** `lab#1360` and `obs#42` are closed (merged to develop).
+- **Probe:** `lab#1360` is closed (merged to develop).
 - **Human-attested:** dedicated use of an ARM64 lab host and an x86_64 lab host. The
   x86_64 host can run **both Ubuntu stacks** (`nativeha-ubuntu`, `pcmk-ubuntu`).
 

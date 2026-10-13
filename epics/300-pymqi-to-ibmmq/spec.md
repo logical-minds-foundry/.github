@@ -2,8 +2,11 @@
 
 - **Epic:** `logical-minds-foundry/.github#300`
 - **Design task:** `logical-minds-foundry/.github#301`
-- **Member repos:** `logical-minds-foundry/mq-resiliency-lab-for-linux` (all code),
-  `logical-minds-foundry/mq-resiliency-observability` (one comment)
+- **Member repo:** `logical-minds-foundry/mq-resiliency-lab-for-linux` (all code).
+  The separate `mq-resiliency-observability` repo is **out of scope**. It is the
+  incomplete, on-hold extraction target of epic `.github#319`. The lab still builds
+  and installs the observability component from `components/mq-resiliency-observability/`
+  in this repo, and that in-repo component is covered here.
 - **Predecessor:** epic `logical-minds-foundry/.github#294` (guest component
   packaging, M1), which this epic waited on. It moved every MQI client into the
   `mq-resiliency-clients` component, and its follow-on `.github#298` (build our own
@@ -99,8 +102,6 @@ from #294:
     `docs/development/{box-model,box-bake-manifest,operating-the-lab-from-a-dev-session}.md`
     and both component READMEs.
   - `tools/validate-event-monitor-wrapper.sh:6`.
-- **The observability repo:** `mq-resiliency-observability/pyproject.toml:7-8` says
-  the runtime "must not drag pymqi or any third-party wheel onto a production host".
 
 ### 1.2 `ibmmq` 2.1.1 (verified against the sdist, 2026-10-13)
 
@@ -144,7 +145,8 @@ from #294:
    x86_64 the install takes the abi3 wheel. On aarch64 it compiles the sdist. Both
    go through the existing offline, hash-pinned path.
 4. **No pymqi references remain** in `mq-resiliency-lab-for-linux` outside
-   historical records, enforced by a guard test, nor in `mq-resiliency-observability`.
+   historical records, enforced by a guard test. That includes both in-repo
+   components.
 5. The lab is **rebaked and cold-rebuilt green on ARM64 and x86_64**, with every
    live-invocable client exercised on each.
 
@@ -297,12 +299,6 @@ These are living docs, updated in the migration PR:
 The closing documentation-review task (#1361) sweeps for anything this list
 misses.
 
-### 4.7 The observability repo
-
-`mq-resiliency-observability#42` rewords `pyproject.toml:7-8`, for example: "must
-not drag an MQ client library or any third-party wheel onto a production host".
-It is independent of the lab PR.
-
 ## 5. Error handling
 
 There are no new error paths. The existing ones carry over:
@@ -402,9 +398,8 @@ bindings at once, or with tests that disagree with the lock.
 |---|---|---|---|
 | `.github#301` | This spec and plan | docs bookend | — |
 | `mq-resiliency-lab-for-linux#1360` | Big-bang migration: code, tests, packaging and lock, comments, repo tests, guard, living docs (§4.1–§4.6) | impl | #301 |
-| `mq-resiliency-observability#42` | Reword the pyproject comment (§4.7) | impl | — |
-| `.github#302` | Ask the ibmmq maintainers for a Linux aarch64 wheel. Closes when sent; its follow-up goes under ad-hoc epic `.github#29` | outreach | — |
-| `mq-resiliency-lab-for-linux#1362` | Validation on ARM64 and x86_64 (§7) | validation | #1360, obs#42 |
+| `.github#302` | Ask the ibmmq maintainers for a Linux aarch64 wheel. **Deferred to the end of the epic** (human decision, 2026-10-13): the aarch64 gap may instead be closed by local, private wheel builds. Decide then whether to send the request or close in favour of local builds | outreach | #1362 |
+| `mq-resiliency-lab-for-linux#1362` | Validation on ARM64 and x86_64 (§7) | validation | #1360 |
 | `mq-resiliency-lab-for-linux#1361` | Documentation review sweep | bookend | #1362 |
 | `.github#303` | Follow-on brainstorm: modernization and the private consumer | bookend | #1362 |
 | `.github#304` | Retrospective | terminal bookend | all |
