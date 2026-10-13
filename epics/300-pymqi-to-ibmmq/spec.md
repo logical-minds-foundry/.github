@@ -341,17 +341,26 @@ QMs it connects to are not changed by this epic. So each platform runs the same 
 - **`pcmk-ubuntu`**: e2e, and `site-pcmk-authz-validate.yml` (`mq-authz-probe`
   plus `mq-dlq-probe`).
 
+**Preconditions (human-attested):** dedicated use of an ARM64 lab host and an
+x86_64 lab host. The x86_64 host can run **both Ubuntu stacks**
+(`nativeha-ubuntu`, `pcmk-ubuntu`). #294 used the x86 host only for RHEL stacks, but
+Ubuntu boxes resolve to the host's architecture.
+
 **On each platform:**
 
 1. `mqlab component build mq-resiliency-clients`, then `mqlab box rebuild`
    the mq-client box. Rebuild means a forced rebake, so the box carries ibmmq.
 2. Cold rebuild: `mqlab commons up`, then `mqlab bootstrap nativeha-ubuntu`.
-3. **The binding.** `mqlab component status --host app-client` (and `svc-sim`)
-   reports the live release, and its selfcheck prints `ok ibmmq 2.1.1`.
-   `ibmmq-2.1.1.dist-info/WHEEL` in the live venv shows the right tag for the
-   platform:
-   - **aarch64:** a locally built `cp314-cp314-linux_aarch64`, proving the sdist
-     compile.
+3. **The binding.** On app-client and svc-sim, run the live venv's
+   `mq-resiliency-clients-selfcheck` directly, with `LD_LIBRARY_PATH=/opt/mqm/lib64`.
+   It prints `ok ibmmq 2.1.1`. Separately, `mqlab component status
+   mq-resiliency-clients --host app-client --host svc-sim` shows the live release
+   **matches CURRENT**. That command only reads `INSTALLED.json` and never runs the
+   selfcheck. `ibmmq-2.1.1.dist-info/WHEEL` in the live venv shows the right tag for
+   the platform. ibmmq builds against the limited API (`py_limited_api="cp39"`), so
+   both tags are `cp39-abi3`:
+   - **aarch64:** `cp39-abi3-linux_aarch64`. The `linux_` platform tag, not
+     `manylinux_`, proves the wheel was built locally from the sdist.
    - **x86_64:** `cp39-abi3-manylinux_2_28_x86_64`, proving the PyPI wheel was used.
 4. **The always-on pair.** `mqlab qm e2e nativeha-ubuntu` passes. This exercises
    `mq-app-requester` against the `mq-svc-responder@` unit.
