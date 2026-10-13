@@ -761,9 +761,20 @@ project root. `INV=$(mqlab build path work)/inventory.ini`, and
 8. **The pcmk stack.**
    - `mqlab teardown nativeha-ubuntu`, then `mqlab bootstrap pcmk-ubuntu`.
    - `mqlab qm e2e pcmk-ubuntu` passes.
-   - `ansible-playbook -i "$INV" site-pcmk-authz-validate.yml`, run as its RUN
-     header directs for a full pass, passes. This includes the `mq-dlq-probe`
-     checks.
+   - In `ansible/`, run
+     `ansible-playbook -i "$INV" site-pcmk-authz-validate.yml -e qm_app=PCMKAPP`
+     with **no `--tags`**. It passes. Ansible then runs every play:
+     - Part A: N1/N3 with `mq-authz-probe` and the `mq-app-requester` positive,
+       the Pacemaker failover, and the re-check.
+     - Part B: N2/N4/N5.
+     - The opt-in `n5-induce` play, which is the **only** caller of `mq-dlq-probe`
+       (`:627,673`).
+
+     Do **not** use the header's `--tags n2,n4,n5`, which skips Part A and
+     `n5-induce`. The header restricts `n5-induce` to an isolated or cold-rebuild
+     arm, and this arm is both. If the run cannot find the PKI CA dir, add
+     `-e authz_pki_ca_dir=$(mqlab build path state)/secrets/pki/ca/app-org`, as the
+     header's RUN note says.
 9. **Leave the lab clean:** `mqlab teardown pcmk-ubuntu`.
 
 **Explicitly not exercised.** State this in the result comment:

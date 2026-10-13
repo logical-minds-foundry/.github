@@ -322,7 +322,13 @@ There are no new error paths. The existing ones carry over:
 
 - Component unit tests: the renamed fakes (§4.2), on the pinned runtime, via
   `mqlab component build`.
-- Repo tests: the `stage_deps` mixed-lock case (§4.4) and the guard (§4.5).
+- Repo tests:
+  - the `stage_deps` mixed-lock case (§4.4);
+  - the guard (§4.5);
+  - a **lock test** on the clients' `uv.lock`. It requires exactly `ibmmq` 2.1.1,
+    with its sdist **and** its `manylinux_2_28_x86_64` wheel, no pymqi, and no
+    `opentelemetry-*` package. A later relock can then neither silently force x86
+    to compile nor switch on OTel propagation.
 - `vrg-container-run -- vrg-validate` is green.
 - Live validation is §7. Nothing on the dev VM can import the real binding.
 
@@ -370,8 +376,11 @@ Ubuntu boxes resolve to the host's architecture.
    completes a TLS MQCONNX to the stack QM. On svc-sim, `mq-dr-responder` completes
    one to `SVCQM`. MQRC 2085 on the undefined DR queues is the expected stop.
 8. `mqlab teardown nativeha-ubuntu`, then `mqlab bootstrap pcmk-ubuntu`.
-   `mqlab qm e2e pcmk-ubuntu` passes, and `site-pcmk-authz-validate.yml` passes,
-   which covers `mq-dlq-probe`.
+   `mqlab qm e2e pcmk-ubuntu` passes. `site-pcmk-authz-validate.yml` passes when
+   run **in full, untagged**. Only a full run reaches `mq-dlq-probe`, which lives in
+   the opt-in `n5-induce` play, and the Part A `mq-authz-probe` checks, which are
+   untagged. The playbook's documented `--tags n2,n4,n5` run skips both. A full run
+   is safe only on a dedicated arm, and this arm is a dedicated cold rebuild.
 
 The exact commands are pinned in the plan.
 
@@ -425,4 +434,4 @@ rewritten to this spec when it publishes.
 | `libmqm_r.so` missing on a client-only install | **[data]** The baked box installs the full server deb set (`mq-install`), so `libmqm_r` is present | selfcheck at install fails loudly |
 | Changing `str` inputs alters bytes on the wire | **[data]** ibmmq encodes str inputs. **[judgment]** every lab value is ASCII | unit tests pin field values; validation e2e |
 | Hidden pymqi-specific behaviour (client-only linkage) | **[data]** 2.1.0 sets CLIENT_CONNECT when an MQCD is passed, and every lab connect passes one | validation step 4 (svc-responder co-located with `SVCQM`) |
-| OTel switches on unexpectedly | **[data]** it is only enabled if OTel imports succeed. The lock has no OTel | guard: the lock diff is reviewed in #1360 |
+| OTel switches on unexpectedly | **[data]** it is only enabled if OTel imports succeed. The lock has no OTel | pinned by the repo lock test (§6) in #1360 |
