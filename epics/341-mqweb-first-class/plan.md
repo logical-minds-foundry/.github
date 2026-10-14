@@ -125,11 +125,13 @@ exercises. Each one's test is added to the task that owns the code.
 **Blocked by:** `.github#342`.
 
 **Files:**
+
 - Create: `docs/reference/mqweb-spike-findings.md`
 - Modify: the spec (`.github` repo, `epics/341-mqweb-first-class/spec.md`) — §3 answers and §8,
   in a follow-up `.github` PR under `#342`'s branch or a new docs task.
 
 **Interfaces:**
+
 - Produces: the REST version string the probe uses (`v2` or `v3`), recorded in the findings
   document as `REST_API_VERSION=<v>`, and the measured per-node cold-start and memory figures.
 
@@ -201,6 +203,7 @@ exercises. Each one's test is added to the task that owns the code.
 **Issue repo:** lab. **Blocked by:** T1 (PASS).
 
 **Files:**
+
 - Modify: `ansible/roles/mqweb/templates/mqwebuser.xml.j2`
 - Create: `ansible/roles/mqweb/tasks/encode.yml`
 - Modify: `ansible/roles/mqweb/tasks/main.yml` (include `encode.yml` before the
@@ -211,6 +214,7 @@ exercises. Each one's test is added to the task that owns the code.
 - Test: `tests/test_mqweb_registry.py`
 
 **Interfaces:**
+
 - Produces:
   - Ansible fact `mqweb_encoded_passwords: dict[str, str]`, keyed by user name plus the key
     `keystore`.
@@ -639,6 +643,7 @@ exercises. Each one's test is added to the task that owns the code.
 **Issue repo:** lab. **Blocked by:** T1 (PASS).
 
 **Files:**
+
 - Modify: `ansible/group_vars/all/authz.yml`
 - Create: `ansible/roles/mq-pcmk-qmgr/templates/mqoperator.mqsc.j2`
 - Modify (apply the template):
@@ -656,6 +661,7 @@ exercises. Each one's test is added to the task that owns the code.
 - Test: `tests/test_mqweb_operator_authz.py`
 
 **Interfaces:**
+
 - Consumes: the `mqoperator` user name from Task 2's `mqweb_users`. The name must match exactly,
   in the same case (IBM S10).
 - Produces: OS account `mqoperator` (group `mqoperator`) on every QM node; group var
@@ -878,6 +884,7 @@ exercises. Each one's test is added to the task that owns the code.
 **Issue repo:** lab. **Blocked by:** T2, T3.
 
 **Files:**
+
 - Modify the 8 plays carrying the role:
   - `ansible/_nativeha-cluster-ha.yml`
   - `ansible/_nativeha-dr-replication.yml`
@@ -892,6 +899,7 @@ exercises. Each one's test is added to the task that owns the code.
 - Create: `tests/test_mqweb_always_on.py`
 
 **Interfaces:**
+
 - Produces: mqweb running on every QM node. `mqweb_enabled` no longer exists anywhere.
 
 - [ ] **Step 1: Write the failing test.** Create `tests/test_mqweb_always_on.py`:
@@ -981,6 +989,7 @@ exercises. Each one's test is added to the task that owns the code.
 **Issue repo:** lab. **Blocked by:** T4.
 
 **Files:**
+
 - Rename: `src/mqlab/rest.py` → `src/mqlab/mqweb_endpoints.py`; `tests/test_rest.py` →
   `tests/test_mqweb_endpoints.py`. Rename `rest_endpoints` → `mqweb_endpoints`,
   `lab_rest_endpoints` → `lab_mqweb_endpoints`, `RestError` → `EndpointError`.
@@ -998,6 +1007,7 @@ exercises. Each one's test is added to the task that owns the code.
   replace `mqlab rest render` with `mqlab console open`.
 
 **Interfaces:**
+
 - Consumes: Task 1's `REST_API_VERSION`, and the `mqreadonly` / `mqreadonly` login from Task 2.
 - Produces:
   - `mqweb_endpoints.lab_mqweb_endpoints() -> list[dict[str, Any]]`, the same record shape as
@@ -1327,6 +1337,7 @@ with `vergil:issue-validate`.
 merged, so the new port forward exists; `grep -rn mqweb_enabled ansible` is empty.
 
 **Procedure:**
+
 1. Do a full cold rebuild of every stack on macOS/arm64 (`mqlab bootstrap <stack>` for each, and
    for svc-sim the shared commons), then repeat on the cloud x86 host.
 2. On every QM node, record `systemctl is-active mqweb.service` (expect `active`), time-to-ready
@@ -1355,6 +1366,7 @@ with the role logins, and add Steps 5–7 below. Remove the "not runnable on a d
 banner.
 
 **Procedure** (spec §6; per stack, both sites):
+
 1. **No anonymous access:** `curl -sk https://<live>:9443/ibmmq/rest/<REST_API_VERSION from Task 1>/admin/qmgr` with no
    credentials → `401`. Opening the Console shows the login page.
 2. **Per role, through REST** (use the CSRF header on writes:
