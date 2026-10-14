@@ -197,6 +197,15 @@ The Native HA state probe works like this: query each candidate, use the one tha
 `running`, and search again on a connection failure or a `replica` answer. This is the HTTP
 analogue of IBM's address-list model [S13].
 
+- **[decision] Probe TLS validation.** The state probe verifies the mqweb certificate chain
+  against the lab's app-org CA but does **not** check the hostname.
+  - **[data, lab]** The `mqweb` certificate is `CN=mqweb` with no IP SAN (#250), and the probe
+    connects by IP.
+  - **[data]** Name-based certificates were the goal of `mq-resiliency-lab-for-linux#252`. That
+    issue was closed as completed on 2026-07-07, but the certificate never shipped (checked
+    2026-10-14). The work, including re-enabling the probe's hostname check, is tracked by the
+    ad-hoc task `mq-resiliency-lab-for-linux#1498`.
+  - This is not an IBM deviation: IBM prescribes nothing for a lab client's TLS checks.
 - **[judgment]** A health-checked load balancer in front of the three instances is the usual
   production answer for HTTP clients that cannot run discovery, such as a browser. It is
   documented as the alternative and is **not built**. A VIP for Native HA is rejected because

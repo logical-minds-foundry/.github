@@ -1115,7 +1115,7 @@ exercises. Each one's test is added to the task that owns the code.
   def _get(url: str, *, user: str, password: str, cafile: Path | None, timeout: float) -> bytes:
       ctx = ssl.create_default_context(cafile=str(cafile) if cafile else None)
       # The org-CA mqweb cert is CN=mqweb with no IP SAN (#250); the chain is verified against
-      # the lab CA, the hostname is not (name-based certs are #252). Deliberate, documented.
+      # the lab CA, the hostname is not (name-based certs: lab#1498). Spec §2.3 decision.
       ctx.check_hostname = False
       token = base64.b64encode(f"{user}:{password}".encode()).decode()
       req = urllib.request.Request(url, headers={"Authorization": f"Basic {token}"})  # noqa: S310
