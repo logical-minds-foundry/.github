@@ -12,7 +12,8 @@ bindings), using the existing `ansible/roles/mqweb` role with the `mqweb_enabled
 Security lives in the role's `mqwebuser.xml.j2`:
 
 - a basic registry with three human users mapped to IBM's three roles;
-- passwords encoded once with `securityUtility`;
+- every password in `mqwebuser.xml` encoded once, with one server AES key, following IBM's
+  procedure (spec S16);
 - an `mqoperator` OS account plus `SET AUTHREC` grants on every QM.
 
 Humans reach the Console through a fixed vergil port forward into the dev VM. On the dev VM,
@@ -54,9 +55,15 @@ step 9). Each implementer substitutes their own issue number in commit messages 
     namelists `+dsp`.
 - **mqweb defaults to keep:** HTTPS only (`httpPort -1`), CSRF on, CORS unset, LTPA at its
   defaults, org-CA `mqweb` certificate over TLS 1.3, `httpHost` `*` (deviation D1).
-- **No `{xor}` encoding** unless IBM's `securityUtility` topic recommends it. Passwords are
-  encoded once and stored under `build/state/mqweb/`, located with `mqlab.paths.state("mqweb")`.
-  Never hardcode a `build/` path.
+- **Password encoding follows IBM S16 to the letter:**
+  - one AES key per mqweb server, made with `securityUtility generateAESKey` and the real lab
+    secret `mqweb_aes_passphrase`;
+  - the key is generated once and copied to every QM node, and included from `mqwebuser.xml`;
+  - **every** password in the file, including the keystore's, is encoded with
+    `securityUtility encode --encoding=aes --aesConfigFile=<key>`.
+
+  The key and the encoded strings are stored once under `mqlab.paths.state("mqweb")`. Never
+  hardcode a `build/` path.
 - **Shell policy.** Use `vrg-git` / `vrg-gh` only. Commit with `vrg-commit`.
 - **Validation.** `vrg-container-run -- vrg-validate` is the only gate.
 - **Tests.** Run with `uv run pytest …` during development. Coverage is 100% branch for `src/`.
@@ -93,7 +100,7 @@ exercises. Each one's test is added to the task that owns the code.
 | `ansible/roles/mqweb/defaults/main.yml` | Drop `mqweb_console_anonymous`; add `mqweb_users` and the encoding | 2 |
 | `ansible/group_vars/all/lab-ui.yml` | Drop `mqweb_console_anonymous` | 2 |
 | `ansible/group_vars/all/admin.yml` | Drop `mqweb_admin_user` / `mqweb_admin_password` | 2 |
-| `lab/topology.yaml` | Drop `mqweb_admin_password` from every stack's `secrets` | 2 |
+| `lab/topology.yaml` | Replace `mqweb_admin_password` with `mqweb_aes_passphrase` in every stack's `secrets` | 2 |
 | `src/mqlab/cli.py` | Export `MQWEB_STATE_DIR` for provision (2); remove `rest` verb and the `pymqrest` PKI entity, add `console open` (5) | 2, 5 |
 | `tests/test_mqweb_registry.py` | Create | 2 |
 | `ansible/group_vars/all/authz.yml` | Add `mqoperator` to `authz_accounts`; add `authz_mqoperator_grants` | 3 |
@@ -205,23 +212,28 @@ exercises. Each one's test is added to the task that owns the code.
 
 **Interfaces:**
 - Produces:
-  - Ansible fact `mqweb_encoded_passwords: dict[str, str]`, mapping user name to encoded string.
+  - Ansible fact `mqweb_encoded_passwords: dict[str, str]`, keyed by user name plus the key
+    `keystore`.
   - Var `mqweb_users: list[{name, role}]`.
-  - Env var `MQWEB_STATE_DIR`, set by `mqlab` for every provision phase.
-  - The on-disk file `<state("mqweb")>/<user>.enc` (mode 0600), one line holding the encoded
-    password.
+  - Env vars `MQWEB_STATE_DIR` (set by `mqlab` for every provision phase) and
+    `MQWEB_AES_PASSPHRASE` (from the `mqweb_aes_passphrase` stack secret).
+  - In the controller state dir (`<state("mqweb")>`, all mode 0600):
+    - `aes-key.xml`, the AES key config;
+    - `<user>.enc` and `keystore.enc`, one encoded string each;
+    - `keystore.sha256`, the hash of the plaintext keystore password the `.enc` was made from.
+  - On every QM node: `{{ mqweb_server_dir }}/aes-key.xml` (owner mqm, 0600).
 
-- [ ] **Step 1: Confirm the encoding IBM recommends.** Fetch the `securityUtility` subtopic:
+- [ ] **Step 1: Read IBM's procedure.** It's already confirmed during alignment and cached at
+  `build/cache/refs/ibm-docs/ibm-mq/10.0.x/mcras-securing-your-mqweb-server-configuration-passwords-by-using-securityutility-command/content.txt`
+  (spec S16). Cite it in the PR description. In summary:
+  - one AES key per mqweb server, created with
+    `securityUtility generateAESKey --createConfigFile=<file> --key=<strongPassphrase>`;
+  - the key file is included from `mqwebuser.xml` with `<include location="<file>"/>`;
+  - every password in the file is encoded with
+    `securityUtility encode --encoding=aes --aesConfigFile=<file> <password>`.
 
-  ```bash
-  python3 tools/ibm_doc_cache.py "https://www.ibm.com/docs/SSYHRD_10.0.0/secure/q127930_.html"
-  grep -rl "securityUtility encode" build/cache/refs/ibm-docs/SSYHRD/10.0.0/ | head
-  ```
-
-  Fetch the topic titled "Securing your mqweb server configuration passwords by using the
-  securityUtility command". Set `mqweb_password_encoding` to the `--encoding` value IBM's example
-  uses (expected `aes`). Cite it in the PR description. If IBM's example is `xor`, use `xor` and
-  note it in the PR. It is then not a deviation.
+  Confirm the tool path on a node running MQ 10.0.1 with `ls /opt/mqm/web/bin/securityUtility`.
+  S16 gives it as `MQ_INSTALLATION_PATH/web/bin`.
 
 - [ ] **Step 2: Write the failing registry test.** Create `tests/test_mqweb_registry.py`:
 
@@ -251,10 +263,20 @@ exercises. Each one's test is added to the task that owns the code.
       defaults = yaml.safe_load(DEFAULTS.read_text(encoding="utf-8"))
       ctx = {
           **defaults,
-          "mqweb_encoded_passwords": ENCODED,
-          "mqweb_keyrpwd": "{aes}KEY",
+          "mqweb_encoded_passwords": {**ENCODED, "keystore": "{aes}KEY"},
+          "mqweb_server_dir": "/var/mqm/web/installations/Installation1/servers/mqweb",
       }
       return env.get_template(TEMPLATE.name).render(**ctx)
+
+
+  def test_includes_the_aes_key_file() -> None:
+      # IBM S16: the key file is included from mqwebuser.xml.
+      assert '<include location="/var/mqm/web/installations/Installation1/servers/mqweb/aes-key.xml"/>' in _render()
+
+
+  def test_keystore_password_is_encoded_not_plaintext() -> None:
+      # IBM S16 applies to EVERY password in the file, including the keystore's.
+      assert 'type="PKCS12" password="{aes}KEY"' in _render()
 
 
   def test_no_anonymous_binding() -> None:
@@ -312,9 +334,12 @@ exercises. Each one's test is added to the task that owns the code.
     - { name: mqadmin,    role: MQWebAdmin }
     - { name: mqreadonly, role: MQWebAdminRO }
     - { name: mqoperator, role: MQWebUser }
-  # Liberty securityUtility --encoding, per IBM's mqweb password topic (Task 2 Step 1).
-  mqweb_password_encoding: aes
-  # Controller-side directory holding <user>.enc (set by mqlab: state("mqweb")).
+  # IBM S16: one AES key per mqweb server; every mqwebuser.xml password is encoded with it.
+  mqweb_server_dir: /var/mqm/web/installations/Installation1/servers/mqweb
+  mqweb_security_utility: /opt/mqm/web/bin/securityUtility
+  # Real lab secret (lab-secret.sh mqweb_aes_passphrase), injected by mqlab; never committed.
+  mqweb_aes_passphrase: "{{ lookup('env', 'MQWEB_AES_PASSPHRASE') }}"
+  # Controller-side store for aes-key.xml and the encoded strings (set by mqlab: state("mqweb")).
   mqweb_state_dir: "{{ lookup('env', 'MQWEB_STATE_DIR') }}"
   ```
 
@@ -323,13 +348,15 @@ exercises. Each one's test is added to the task that owns the code.
   ```jinja
   <?xml version="1.0" encoding="UTF-8"?>
   <!-- mqweb security (epic .github#341 spec §2.2): IBM's three roles (S8), one sample user per
-       role in a basic registry (S10). No anonymous access. Passwords are securityUtility-
-       encoded once and persisted (S9), so this render is stable across re-provisions. -->
+       role in a basic registry (S10). No anonymous access. Every password in this file is
+       AES-encoded with the server's one key, which is included below (S16). Each was encoded
+       once and persisted, so this render is stable across re-provisions. -->
   <server>
     <featureManager>
       <feature>appSecurity-2.0</feature>
       <feature>basicAuthenticationMQ-1.0</feature>
     </featureManager>
+    <include location="{{ mqweb_server_dir }}/aes-key.xml"/>
   {% for app in ['com.ibm.mq.console', 'com.ibm.mq.rest'] %}
     <enterpriseApplication id="{{ app }}">
       <application-bnd>
@@ -348,7 +375,7 @@ exercises. Each one's test is added to the task that owns the code.
     </basicRegistry>
     <variable name="httpHost" value="*"/>
   {% if mqweb_tls | bool %}
-    <keyStore id="mqwebKeyStore" location="{{ mqweb_security_dir }}/key.p12" type="PKCS12" password="{{ mqweb_keyrpwd }}"/>
+    <keyStore id="mqwebKeyStore" location="{{ mqweb_security_dir }}/key.p12" type="PKCS12" password="{{ mqweb_encoded_passwords['keystore'] }}"/>
     <ssl id="mqwebSSL" keyStoreRef="mqwebKeyStore" serverKeyAlias="mqweb" sslProtocol="TLSv1.3"/>
     <sslDefault sslRef="mqwebSSL"/>
   {% else %}
@@ -360,29 +387,34 @@ exercises. Each one's test is added to the task that owns the code.
   </server>
   ```
 
-  **Keystore password stability.** `mqweb_keyrpwd` comes from `pki-distribute`. Confirm in the PR
-  that it is stable across runs, by reading `ansible/roles/pki-distribute`. If it isn't, the
-  restart-on-change fires on every run, so fix it in this task the same way.
+  **Keystore password.** `mqweb_keyrpwd` (the plaintext PKCS#12 password from `pki-distribute`) is
+  no longer put in the file. It is encoded like the user passwords (Step 6), and re-encoded only
+  when its SHA-256 changes, for example after a certificate rotation.
 
 - [ ] **Step 5: Run the test and confirm it passes.**
   Run: `uv run pytest tests/test_mqweb_registry.py -v`
-  Expected: PASS (5 tests).
+  Expected: PASS (7 tests).
 
-- [ ] **Step 6: Encode-once tasks.** First confirm the tool's path on a node running MQ 10.0.1
-  (`ls /opt/mqm/web/bin/securityUtility`); if it differs, use the real path below. Create
+- [ ] **Step 6: Encode-once tasks, IBM S16 to the letter.** Create
   `ansible/roles/mqweb/tasks/encode.yml`:
 
   ```yaml
-  # Encode each human password ONCE with Liberty's securityUtility (IBM S9) and persist it
-  # on the controller under state("mqweb"), so every later render inserts the SAME string and
-  # mqwebuser.xml stays byte-identical. A salted encoding re-run would change the file and
-  # trip the role's restart-on-change (spec §2.2, Review Focus 1). Fail loud with no state dir.
-  - name: require the controller mqweb state dir (set by mqlab as MQWEB_STATE_DIR)
+  # IBM S16 (MQ 10.0.x "Securing your mqweb server configuration passwords by using the
+  # securityUtility command"): ONE AES key per mqweb server, generated with generateAESKey,
+  # included from mqwebuser.xml, and used to encode EVERY password in the file. The key is made
+  # once and copied to every QM node (an encoded string must decode wherever the QM runs). Each
+  # password is encoded once and persisted on the controller under state("mqweb"), so every
+  # render inserts the SAME strings and mqwebuser.xml stays byte-identical (spec §2.2, Review
+  # Focus 1). Fail loud on missing inputs.
+  - name: require the controller state dir and the AES passphrase (exported by mqlab)
     ansible.builtin.assert:
-      that: mqweb_state_dir | length > 0
+      that:
+        - mqweb_state_dir | length > 0
+        - mqweb_aes_passphrase | length > 0
       fail_msg: >-
-        MQWEB_STATE_DIR is unset — run provisioning through `mqlab bootstrap <stack>`,
-        which exports it (spec §2.2).
+        MQWEB_STATE_DIR / MQWEB_AES_PASSPHRASE unset — run provisioning through
+        `mqlab bootstrap <stack>`, which exports both (spec §2.2).
+    no_log: true
 
   - name: ensure the controller mqweb state dir exists
     ansible.builtin.file:
@@ -393,7 +425,58 @@ exercises. Each one's test is added to the task that owns the code.
     run_once: true
     become: false
 
-  - name: which encoded passwords already exist
+  - name: is the AES key already generated
+    ansible.builtin.stat:
+      path: "{{ mqweb_state_dir }}/aes-key.xml"
+    register: mqweb_key_stat
+    delegate_to: localhost
+    run_once: true
+    become: false
+
+  - name: generate the server's AES key ONCE (securityUtility generateAESKey, IBM S16)
+    ansible.builtin.command:
+      argv:
+        - "{{ mqweb_security_utility }}"
+        - generateAESKey
+        - "--createConfigFile={{ mqweb_server_dir }}/aes-key.xml"
+        - "--key={{ mqweb_aes_passphrase }}"
+      creates: "{{ mqweb_server_dir }}/aes-key.xml"
+    when: not mqweb_key_stat.stat.exists
+    run_once: true
+    become: true
+    become_user: mqm
+    no_log: true
+
+  - name: read the newly generated key back
+    ansible.builtin.slurp:
+      src: "{{ mqweb_server_dir }}/aes-key.xml"
+    register: mqweb_key_new
+    when: not mqweb_key_stat.stat.exists
+    run_once: true
+    become: true
+
+  - name: persist the key on the controller (0600)
+    ansible.builtin.copy:
+      content: "{{ mqweb_key_new.content | b64decode }}"
+      dest: "{{ mqweb_state_dir }}/aes-key.xml"
+      mode: "0600"
+    when: not mqweb_key_stat.stat.exists
+    delegate_to: localhost
+    run_once: true
+    become: false
+    no_log: true
+
+  - name: place the same key on THIS node (mqm, 0600)
+    ansible.builtin.copy:
+      src: "{{ mqweb_state_dir }}/aes-key.xml"
+      dest: "{{ mqweb_server_dir }}/aes-key.xml"
+      owner: mqm
+      group: mqm
+      mode: "0600"
+    become: true
+    no_log: true
+
+  - name: which encoded user passwords already exist
     ansible.builtin.stat:
       path: "{{ mqweb_state_dir }}/{{ item.name }}.enc"
     loop: "{{ mqweb_users }}"
@@ -403,12 +486,13 @@ exercises. Each one's test is added to the task that owns the code.
     run_once: true
     become: false
 
-  - name: encode missing passwords with securityUtility (password = username, lab convention)
+  - name: encode missing user passwords (password = username, lab convention; IBM S16)
     ansible.builtin.command:
       argv:
-        - /opt/mqm/web/bin/securityUtility
+        - "{{ mqweb_security_utility }}"
         - encode
-        - "--encoding={{ mqweb_password_encoding }}"
+        - --encoding=aes
+        - "--aesConfigFile={{ mqweb_server_dir }}/aes-key.xml"
         - "{{ item.item.name }}"
     loop: "{{ mqweb_enc_stat.results }}"
     loop_control: { label: "{{ item.item.name }}" }
@@ -417,9 +501,10 @@ exercises. Each one's test is added to the task that owns the code.
     changed_when: true
     run_once: true
     become: true
+    become_user: mqm
     no_log: true
 
-  - name: persist newly encoded passwords on the controller (0600)
+  - name: persist newly encoded user passwords on the controller (0600)
     ansible.builtin.copy:
       content: "{{ item.stdout | trim }}\n"
       dest: "{{ mqweb_state_dir }}/{{ item.item.item.name }}.enc"
@@ -431,15 +516,63 @@ exercises. Each one's test is added to the task that owns the code.
     become: false
     no_log: true
 
+  # The keystore password changes only when pki-distribute re-issues the store. Re-encode
+  # exactly then, by comparing the SHA-256 of the current plaintext with the one recorded.
+  - name: compare the keystore password with the one last encoded
+    ansible.builtin.set_fact:
+      mqweb_keystore_sha: "{{ mqweb_keyrpwd | hash('sha256') }}"
+      mqweb_keystore_recorded: >-
+        {{ lookup('ansible.builtin.file', mqweb_state_dir ~ '/keystore.sha256', errors='ignore')
+           | default('', true) | trim }}
+    no_log: true
+    when: mqweb_tls | bool
+
+  - name: encode the keystore password (IBM S16 — every password in the file)
+    ansible.builtin.command:
+      argv:
+        - "{{ mqweb_security_utility }}"
+        - encode
+        - --encoding=aes
+        - "--aesConfigFile={{ mqweb_server_dir }}/aes-key.xml"
+        - "{{ mqweb_keyrpwd }}"
+    register: mqweb_keystore_enc
+    changed_when: true
+    run_once: true
+    become: true
+    become_user: mqm
+    no_log: true
+    when: mqweb_tls | bool and mqweb_keystore_sha != mqweb_keystore_recorded
+
+  - name: persist the encoded keystore password and its source hash (0600)
+    ansible.builtin.copy:
+      content: "{{ item.content }}\n"
+      dest: "{{ mqweb_state_dir }}/{{ item.name }}"
+      mode: "0600"
+    loop:
+      - { name: keystore.enc,    content: "{{ mqweb_keystore_enc.stdout | default('') | trim }}" }
+      - { name: keystore.sha256, content: "{{ mqweb_keystore_sha | default('') }}" }
+    loop_control: { label: "{{ item.name }}" }
+    delegate_to: localhost
+    run_once: true
+    become: false
+    no_log: true
+    when: mqweb_keystore_enc is changed
+
   - name: load the encoded passwords for the registry render
     ansible.builtin.set_fact:
       mqweb_encoded_passwords: >-
-        {{ mqweb_encoded_passwords | default({}) | combine({item.name:
-           lookup('ansible.builtin.file', mqweb_state_dir ~ '/' ~ item.name ~ '.enc')}) }}
-    loop: "{{ mqweb_users }}"
-    loop_control: { label: "{{ item.name }}" }
+        {{ mqweb_encoded_passwords | default({}) | combine({item:
+           lookup('ansible.builtin.file', mqweb_state_dir ~ '/' ~ item ~ '.enc')}) }}
+    loop: "{{ (mqweb_users | map(attribute='name') | list) + (['keystore'] if mqweb_tls | bool else []) }}"
     no_log: true
   ```
+
+  A note on the plays' `serial: 1`: `run_once` runs once per serial batch. The `stat` and `when`
+  guards make every later batch a no-op, so the key is generated once and each password is
+  encoded once per lab.
+
+  The TLS tasks that set `mqweb_keyrpwd` must run before this include. They already run before
+  the registry task, which this include precedes.
 
   In `ansible/roles/mqweb/tasks/main.yml`, insert this before the `mqweb basic registry` task:
 
@@ -471,8 +604,16 @@ exercises. Each one's test is added to the task that owns the code.
     and their comment.
   - In `ansible/group_vars/all/lab-ui.yml`, delete the `mqweb_console_anonymous` line, and reword
     the header comment to say the MQ Console now requires a login (spec §2.2).
-  - In `lab/topology.yaml`, remove `mqweb_admin_password` from each stack's `secrets:`. Leave
-    `pcmk_hacluster_password` on `pcmk-ubuntu`; an empty list becomes `secrets: []`.
+  - In `lab/topology.yaml`, **replace** `mqweb_admin_password` with `mqweb_aes_passphrase` in
+    each stack's `secrets:`. `pcmk-ubuntu` becomes `[pcmk_hacluster_password, mqweb_aes_passphrase]`.
+    The existing sequencer then exports `MQWEB_AES_PASSPHRASE` from `lab-secret.sh` with no new
+    code.
+  - svc-sim needs nothing extra. Every stack's provision playbook imports
+    `site-distributed-shared.yml` (`site-pcmk.yml`, `site-rdqm.yml`, `site-nativeha.yml`,
+    `site-nativeha-ubuntu.yml`; see `src/mqlab/cli.py` `_stack_mq_boxes` docstring), so svc-sim's
+    mqweb is provisioned inside a stack run that has already exported both variables. Because
+    `aes-key.xml` and the `.enc` files are shared lab-wide under `state("mqweb")`, svc-sim gets
+    the same key and the same encoded strings.
   - Run `grep -rn "mqweb_admin\|MQWEB_ADMIN\|mqweb_console_anonymous\|mqweb.env" src ansible lab docs/site`.
     Expect matches only in historical docs (`docs/plans`, `docs/specs`) and in test fixtures that
     build their own topology strings. Update `docs/development/lab-bringup-capture.md`'s
@@ -631,11 +772,8 @@ exercises. Each one's test is added to the task that owns the code.
     - { objtype: NAMELIST, profile: "**", authadd: "DSP" }
   ```
 
-  Then fetch the local-mode equivalent of S15:
-  - search IBM 10.0.x for "MQWebUser" and "authority" under *Working with local queue managers*;
-  - cache it with `tools/ibm_doc_cache.py`;
-  - if its minimum list differs, change these grants to match, and record the difference in the
-    PR and in spec §2.2.
+  IBM documents no separate local-mode minimum; this was checked during alignment and is
+  recorded in spec §2.2. S15's list is applied as written, and Task 7 proves it on the live lab.
 
 - [ ] **Step 4: Create the template** `ansible/roles/mq-pcmk-qmgr/templates/mqoperator.mqsc.j2`:
 
