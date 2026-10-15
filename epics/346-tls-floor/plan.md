@@ -8,6 +8,7 @@ Repo shorthand: `lab#N` = `logical-minds-foundry/mq-resiliency-lab-for-linux#N`;
 **Goal:** find, apply and document the highest TLS floor per domain (A: MQ's own TLS; B: RDQM and mqweb; C: telemetry ingest), with the lab running at it on both hosts.
 
 **Architecture:**
+
 - A per-setting **register** is the evidence spine. Each phase raises one group of hops to its domain floor and updates the register.
 - `mqlab tls audit`, plus downgrade and misconfigured-peer tests, prove the floor.
 - One cold-rebuild validation round per domain closes each group.
