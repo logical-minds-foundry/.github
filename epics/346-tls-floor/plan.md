@@ -40,24 +40,24 @@ Repo shorthand: `lab#N` = `logical-minds-foundry/mq-resiliency-lab-for-linux#N`;
 | ID | Issue | Kind | Run via | Blocked by | Done when |
 |---|---|---|---|---|---|
 | DOC | .github#347 | docs | this PR | — | Spec and plan merged |
-| R | (filed at backlog time) | docs | `issue-implement` (in `.github`) | #341 closed; human says the epic starts | Spec and plan re-baselined against the current lab (MQ level, #341's mqweb design, stack/PKI/obs changes, §3 current-state tables); human-approved docs PR merged; task issues below refreshed |
-| S | (filed) | code (spike + doc) | `issue-implement` | R | Spike answers to spec §6.2 on **both** hosts. First draft of `docs/reference/tls-floor.md` (register) merged. Per-domain floor proposals **decided by the human** (recorded on the epic). Upstream drafts written. P1–P5 issue bodies refreshed from the findings |
-| P1 | (filed) | code | `issue-implement` | S | PKI changes the register adopts (keystore format / PQ-capable keystores / certificate algorithm) merged with a migration path, **or** closed as not needed with the spike evidence |
-| AUD | (filed) | code | `issue-implement` | S | `mqlab tls audit <stack>` merged (MQ channels and Native HA observers first; telemetry and RDQM observers added by P4a/P4b/P5a). Downgrade and misconfigured-peer test harness merged. "Not observable" ≠ pass |
-| P2a | (filed) | code | `issue-implement` | P1, AUD | Every channel initiator requests PQ (SDR channels, MQCD in `mqrc` clients and the svc responder, exporter CCDT). Audit shows non-`NONE` `SSLQS` on every running channel in a live check recorded on the issue |
-| P2b | (filed) | code | `issue-implement` | P2a | `SSLQSR(REQUIRED)` on every channel, plus adopted above-floor settings (e.g. `AllowedQuantumSafeAlgorithms`, pinned suite), guarded by review focus #1 |
-| P3 | (filed) | code | `issue-implement` | P1, AUD | Native HA / CRR / IRR on TLS 1.3 (`CipherSpec`, `GroupCipherSpec`) with `QuantumSafeAlgorithm` and `QuantumSafeRequired=Yes`; TLS 1.2 removed; misconfigured-peer test defined |
-| VA-mac | (filed) | validation | `issue-validate` (macOS) | P2b, P3 | SUCCESS: Ubuntu matrix cold, audit clean, downgrade/peer tests refused, cost recorded |
-| VA-cloud | (filed) | validation | `issue-validate` (cloud agent) | P2b, P3 | SUCCESS: RHEL matrix cold (incl. a CRR site switch), the same checks |
-| P4a | (filed) | code | `issue-implement` | VA-mac, VA-cloud | Telemetry PKI. **Mutual TLS** on every MQ-host scrape target (exporter HTTP, node_exporter), PQ where the Go stack supports it. Audit observers for those endpoints |
-| P4b | (filed) | code | `issue-implement` | P4a | Alloy → Data Prepper OTLP/gRPC on TLS (mutual where supported), PQ where supported. Original spec §10 marked superseded. Data Prepper → OpenSearch recorded N/A (loopback) |
-| VC-mac | (filed) | validation | `issue-validate` (macOS) | P4b | SUCCESS: full matrix cold with telemetry audit and downgrade tests |
-| VC-cloud | (filed) | validation | `issue-validate` (cloud agent) | P4b | SUCCESS: the same on cloud |
-| P5a | (filed) | code | `issue-implement` | VA-cloud | RDQM replication at the strictest `tlshd` setting the spike found, **or** a human-approved named exception with evidence; audit observer or "not observable" recorded |
-| P5b | (filed) | code | `issue-implement` | S, #341 | mqweb (Console/REST) at domain B's floor per #341's design; audit observer; downgrade test |
-| VB-mac | (filed) | validation | `issue-validate` (macOS) | P5b | SUCCESS: mqweb surface checks on the Ubuntu stacks |
-| VB-cloud | (filed) | validation | `issue-validate` (cloud agent) | P5a, P5b | SUCCESS: RDQM rows cold plus mqweb surface |
-| F | (filed) | code (doc) | `issue-implement` | VB-mac, VB-cloud, VC-mac, VC-cloud | `docs/reference/tls-floor.md` final: every in-scope hop has a complete register row, floors and named exceptions are stated, cost data is in, upstream drafts are linked; `tls-coverage.md` points to it |
+| R | .github#349 | docs | `issue-implement` (in `.github`) | #341 closed; human says the epic starts | Spec and plan re-baselined against the current lab (MQ level, #341's mqweb design, stack/PKI/obs changes, §3 current-state tables); human-approved docs PR merged; task issues below refreshed |
+| S | lab#1522 | code (spike + doc) | `issue-implement` | R | Spike answers to spec §6.2 on **both** hosts. First draft of `docs/reference/tls-floor.md` (register) merged. Per-domain floor proposals **decided by the human** (recorded on the epic). Upstream drafts written. P1–P5 issue bodies refreshed from the findings |
+| P1 | lab#1523 | code | `issue-implement` | S | PKI changes the register adopts (keystore format / PQ-capable keystores / certificate algorithm) merged with a migration path, **or** closed as not needed with the spike evidence |
+| AUD | lab#1524 | code | `issue-implement` | S | `mqlab tls audit <stack>` merged (MQ channels and Native HA observers first; telemetry and RDQM observers added by P4a/P4b/P5a). Downgrade and misconfigured-peer test harness merged. "Not observable" ≠ pass. The audit is **wired into the end of `mqlab bootstrap`** (observe phase): every bring-up checks the floor and fails loud naming the offending hop (spec §7.3, "from then on") |
+| P2a | lab#1525 | code | `issue-implement` | P1, AUD | Every channel initiator requests PQ (SDR channels, MQCD in `mqrc` clients and the svc responder, exporter CCDT). Audit shows non-`NONE` `SSLQS` on every running channel in a live check recorded on the issue |
+| P2b | lab#1526 | code | `issue-implement` | P2a | `SSLQSR(REQUIRED)` on every channel, plus adopted above-floor settings (e.g. `AllowedQuantumSafeAlgorithms`, pinned suite), guarded by review focus #1 |
+| P3 | lab#1527 | code | `issue-implement` | P1, AUD | Native HA / CRR / IRR on TLS 1.3 (`CipherSpec`, `GroupCipherSpec`) with `QuantumSafeAlgorithm` and `QuantumSafeRequired=Yes`; TLS 1.2 removed; misconfigured-peer test defined |
+| VA-mac | lab#1528 | validation | `issue-validate` (macOS) | P2b, P3 | SUCCESS: Ubuntu matrix cold, audit clean, downgrade/peer tests refused, cost recorded |
+| VA-cloud | lab#1529 | validation | `issue-validate` (cloud agent) | P2b, P3 | SUCCESS: RHEL matrix cold (incl. a CRR site switch), the same checks |
+| P4a | lab#1530 | code | `issue-implement` | VA-mac, VA-cloud | Telemetry PKI. **Mutual TLS** on every MQ-host scrape target (exporter HTTP, node_exporter), PQ where the Go stack supports it. Audit observers and **downgrade tests** for those endpoints |
+| P4b | lab#1531 | code | `issue-implement` | P4a | Alloy → Data Prepper OTLP/gRPC on TLS (mutual where supported), PQ where supported. Original spec §10 marked superseded. Data Prepper → OpenSearch recorded N/A (loopback) |
+| VC-mac | lab#1532 | validation | `issue-validate` (macOS) | P4b | SUCCESS: full matrix cold with telemetry audit and downgrade tests |
+| VC-cloud | lab#1533 | validation | `issue-validate` (cloud agent) | P4b | SUCCESS: the same on cloud |
+| P5a | lab#1534 | code | `issue-implement` | VA-cloud | RDQM replication at the strictest `tlshd` setting the spike found, **or** a human-approved named exception with evidence; audit observer or "not observable" recorded |
+| P5b | lab#1535 | code | `issue-implement` | S, #341 | mqweb (Console/REST) at domain B's floor per #341's design; audit observer; downgrade test |
+| VB-mac | lab#1536 | validation | `issue-validate` (macOS) | P5b | SUCCESS: mqweb surface checks on the Ubuntu stacks |
+| VB-cloud | lab#1537 | validation | `issue-validate` (cloud agent) | P5a, P5b | SUCCESS: RDQM rows cold plus mqweb surface |
+| F | lab#1538 | code (doc) | `issue-implement` | VB-mac, VB-cloud, VC-mac, VC-cloud | `docs/reference/tls-floor.md` final: every in-scope hop has a complete register row, floors and named exceptions are stated, cost data is in, upstream drafts are linked; `tls-coverage.md` points to it. Includes the **ML-DSA certificate gap** register row (spec §3) and a **legacy sweep** proving no TLS 1.2 / classical-only / plain-text option remains selectable (spec §9). `tls audit` plus the downgrade tests are added to the **standard validation procedure** future validation tasks follow (spec §7.3) |
 | DR | lab#1519 | docs review | `issue-implement` (sweep) | F | Site, reference and dev docs reflect the floor; sibling doc tasks spawned where needed |
 | RETRO | .github#348 | retrospective | `epic-retrospective` | every other child closed | `retrospective.md` merged; the epic closes |
 
