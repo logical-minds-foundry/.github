@@ -32,6 +32,7 @@ Repo shorthand: `lab#N` = `logical-minds-foundry/mq-resiliency-lab-for-linux#N`.
 | F5 | lab#1514 | code | `issue-implement` | E | `mqlab qm reload` (PR merged) |
 | F6 | lab#1515 | code | `issue-implement` | E | RDQM HA heartbeat timeout 10 s (PR merged) |
 | F6-V | lab#1546 | validation | `issue-validate`, by the cloud agent | F6 | SUCCESS: `rdqm-rhel@10` and `@9` cold with the 10 s timeout. By human decision, evidenced by the cloud agent's in-progress cold rebuild, which includes F6 |
+| AD | lab#1557 | code | `issue-implement` | F6-V (found by it) | SVCQM adopts a failed-over sender (`AdoptNewMCA=ALL`, `AdoptNewMCACheck=NAME,QM`) and inter-QM `HBINT(10)` (PR merged, lab#1562) |
 | G | lab#1555 | code (docs) | `issue-implement` | DR (found by it) | Site guides, standard and template re-pinned from MQ 9.4 to 10.0.x (PR merged) |
 | DR | lab#1441 | docs review | `issue-implement` (sweep) | A, B, V-mac, V-cloud, E, T9, V26-mac, V26-cloud resolved, plus the tasks above | Site, dev and reference docs reflect the epic |
 | RETRO | .github#317 | retrospective | `epic-retrospective` | every other child closed | `retrospective.md` merged; the epic closes |
@@ -47,6 +48,7 @@ Repo shorthand: `lab#N` = `logical-minds-foundry/mq-resiliency-lab-for-linux#N`.
 | lab#1488 | `rdqmadm -c` lock race |
 | lab#1491 | NIC profile SELinux relabel |
 | lab#1540 | `nativeha-find-active` fails loud when no Active is elected |
+| lab#1511 | authz validation reads `dmpmqaut` evidence from stdout and stderr (MQ 10.0.1 writes it to stderr) |
 
 **Upstream reporting:**
 
