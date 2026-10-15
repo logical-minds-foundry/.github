@@ -96,5 +96,6 @@ The sequence that finally went green (ARM64, #1509 run 2, `develop` `f9787f8`):
 5. `mqlab teardown nativeha-ubuntu --commons`.
 
 Gotchas:
+
 - Run ad-hoc `ansible` with stdin from `/dev/null` and output to a file. Agent tool shells have non-blocking stdio, which ansible refuses.
 - The clients need `LD_LIBRARY_PATH=/opt/mqm/lib64` when run by hand.
