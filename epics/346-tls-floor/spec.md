@@ -55,7 +55,10 @@ Everything that carries MQ-derived metrics, logs or events from the MQ hosts int
 | Prometheus → MQ exporter HTTP endpoint | Plain HTTP |
 | Prometheus → node_exporter (incl. the HA/DR collectors' textfile metrics) | Plain HTTP |
 | Log and event collection on MQ hosts → Data Prepper (Alloy, OTLP/gRPC) | Plain text (`tls { insecure = true }`, `ssl: false`) |
-| Data Prepper → OpenSearch | `http://localhost:9200` |
+
+**Network-crossing rule.** A hop is in scope only if it **crosses a network**. A loopback hop between co-located components that does not touch MQ gets a register row marked "N/A: loopback, not reachable off-host", with evidence, and needs no TLS. If the components are ever split onto separate nodes, the hop comes into scope automatically.
+
+- **Example:** Data Prepper → OpenSearch (`http://localhost:9200`, both on the obs node) is out of scope. It is loopback, part of the lab's monitoring infrastructure, and does not touch MQ.
 
 **Superseded decision.** The original lab design ([`docs/specs/2026-06-03-mq-cluster-lab-design.md`](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/blob/develop/docs/specs/2026-06-03-mq-cluster-lab-design.md) §10) declares a "mgmt-only telemetry plane, no TLS in v1". This epic supersedes it, and the superseding is recorded in that spec.
 
@@ -88,7 +91,9 @@ Every security setting in scope gets a register row with these columns:
 
 ### 4.3 Ship rule
 
-- **Within a domain:** ship the strictest value that works on **both hosts** (macOS arm64 and cloud x86_64) for every hop in the domain. A value that works on one host only is a finding and does not ship.
+- **Within a domain:** ship the strictest value that works on **every host where the hop exists**.
+  - **Hops on both hosts** (macOS arm64 and cloud x86_64): host parity is required. A value that works on one host only is a finding and does not ship.
+  - **Single-host hops** (for example RDQM replication and the RHEL stacks, which are x86_64-only per `lab/versions.yaml`): parity does not apply, and the floor is set on the host where the hop exists.
 - **Across domains:** domains are independent. A limitation in one domain never lowers another domain's floor.
 - **Named exceptions:** if one component cannot reach its domain's floor, it gets a named exception (component, value reached, reason, evidence, upstream finding). The domain's floor stays where it is.
 - **Decisions with the human:** whether a limitation becomes a named exception or a lower domain floor is decided with the human. The agent never lowers a floor on its own.
@@ -112,7 +117,16 @@ It exits non-zero if any hop is below its floor and not covered by a named excep
 
 ### 5.2 Downgrade tests
 
-For each domain, a deliberately weak client must be **refused**: classical-only key exchange, TLS 1.2, and, where the register adopts it, a non-AES-256 suite. A downgrade that is accepted fails validation.
+Negative evidence that nothing below the floor is accepted, defined per kind of hop. The weak settings tested are: classical-only key exchange, TLS 1.2, and, where the register adopts it, a non-AES-256 suite.
+
+- **Client-facing hops** (MQ channels, telemetry endpoints): a deliberately weak **client** must be refused.
+- **Replication hops** (Native HA, CRR, IRR, RDQM): a **misconfigured-peer test** in a throwaway run.
+  1. Set one instance's TLS settings below the floor.
+  2. Prove that replication refuses to form, the expected error is logged, and `mqlab tls audit` flags it.
+  3. Restore the settings and confirm the instance recovers.
+- **Where no negative test is possible** (likely RDQM's kernel TLS): record "negative test not possible" in the register, with the reason, backed by configuration evidence plus the observed negotiated values.
+
+A downgrade or misconfigured peer that is accepted fails validation.
 
 ### 5.3 Cold-rebuild validation
 
@@ -172,7 +186,7 @@ The spike answers the unknowns cheaply, on one spike stack per host. Its code is
 4. **Telemetry plane (C):**
    - a telemetry PKI from `lab-pki`;
    - TLS with **mutual TLS** on every MQ-host scrape target;
-   - TLS on Alloy → Data Prepper and on Data Prepper → OpenSearch (OpenSearch's security plugin for transport TLS only);
+   - TLS on Alloy → Data Prepper (Data Prepper → OpenSearch is loopback and out of scope, §3 C);
    - PQ wherever the stack supports it;
    - the original spec §10 marked superseded.
 5. **RDQM and mqweb (B):** the strictest `tlshd` setting the spike found possible, or a named exception; and the mqweb surface from #341 at the domain floor.
@@ -195,7 +209,7 @@ Each phase updates its register rows and `tls-coverage.md`, and removes the lega
 
 - `docs/reference/tls-floor.md` is merged, with a complete register for every in-scope hop.
 - Every domain runs at its agreed floor on both hosts. Every gap is either a named exception, approved by the human, or a recorded finding.
-- `mqlab tls audit` passes, and every downgrade test is refused, in all three cold-rebuild validation rounds (§5.3).
+- `mqlab tls audit` passes in all three cold-rebuild validation rounds (§5.3). In each round, every downgrade and misconfigured-peer test is refused, or the hop's register row records "negative test not possible" with its reason and evidence (§5.2).
 - No legacy TLS setting remains selectable in the lab.
 - Upstream findings are drafted, and filed by the human or explicitly deferred.
 
