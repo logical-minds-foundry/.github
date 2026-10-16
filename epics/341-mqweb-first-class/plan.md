@@ -44,6 +44,11 @@ spike-found bug tasks, lab#1569 and #1570, are described under
 - **The macOS/arm64 half is deferred** to end-of-epic validation: T6 runs the arm64 cold rebuild
   and the cost measurements, and T7 checks the Console views in a browser. The macOS lab is busy
   with another effort, and the human accepts the small risk that arm64 differs (spec §7).
+- **On macOS/arm64, only the Ubuntu stacks run** (spec §4). RHEL is x86-only: IBM ships no
+  RHEL-on-ARM MQ binaries, and `mqlab bootstrap` refuses a RHEL stack on aarch64 (lab#847). The
+  arm64 half of the spike therefore runs on `nativeha-ubuntu` (Native HA + CRR, QM `NHAUAPP`),
+  not `nativeha-rhel-crr`. Sending the arm64 checks to the RHEL stacks was an oversight, found by
+  lab#1595 and corrected by `.github#360`.
 - **A macOS surprise in T6 or T7 pauses the epic** for discussion, exactly as a T1 surprise
   would have (spec §3).
 - **The bug tasks lab#1569 and #1570** are independent of T2–T5 and can run in parallel with
@@ -162,7 +167,8 @@ about 245 MB at ready, settling to about 170 MB. `REST_API_VERSION=v3`. The prov
 (the per-QM query answers HTTP 500 on replicas) is resolved by spec §2.3's "follow the active"
 algorithm, and the gate is **PASS on cloud x86** (spec §3.1). The **macOS/arm64 half** of Steps
 1–3 is deferred: its cold rebuild, cost figures and REST table re-run move to Task 6, and the
-Console screenshots move to Task 7. The steps below are kept as the record of the method; Step 3's
+Console screenshots move to Task 7. On arm64 they run on `nativeha-ubuntu`, because RHEL is
+x86-only (spec §4, `.github#360`). The steps below are kept as the record of the method; Step 3's
 per-QM `curl` is the query that exposed the surprise.
 
 **Files:**
@@ -1567,8 +1573,11 @@ merged, so the new port forward exists; `grep -rn mqweb_enabled ansible` is empt
 
 **Procedure:**
 
-1. Do a full cold rebuild of every stack on macOS/arm64 (`mqlab bootstrap <stack>` for each, and
-   for svc-sim the shared commons), then repeat on the cloud x86 host.
+1. Do a full cold rebuild of every stack the platform supports (spec §4), with `mqlab bootstrap
+   <stack>` for each and the shared commons for svc-sim:
+   - **macOS/arm64:** the Ubuntu stacks only (`pcmk-ubuntu`, `nativeha-ubuntu`). The RHEL stacks
+     are x86-only (lab#847).
+   - **cloud x86:** every stack.
 2. On every QM node, record `systemctl is-active mqweb.service` (expect `active`), time-to-ready
    and the Java RSS, using the same commands as Task 1 Step 2.
 3. Re-provision one live stack (`mqlab bootstrap nativeha-ubuntu --phase provision`, or the
@@ -1576,7 +1585,8 @@ merged, so the new port forward exists; `grep -rn mqweb_enabled ansible` is empt
    - `ansible` reports `mqwebuser.xml` **unchanged** on every node;
    - `systemctl show mqweb -p ActiveEnterTimestamp` is unchanged.
 4. **The spike's deferred macOS/arm64 half** (spec §3.1). From the macOS/arm64 cold rebuild of
-   `nativeha-rhel-crr` in step 1:
+   `nativeha-ubuntu` in step 1 (`nha-ubuntu-a1..a3`, `-b1..b3`; QM `NHAUAPP`). It stands in for
+   `nativeha-rhel-crr`, which cannot run on arm64 (spec §4):
    - record the one-pass result and total wall clock, the readiness-gate wait per node
      (`a1..a3`, `b1..b3`), `ready_s` min / median / max per node and `rss_kb` at ready and at
      +60 s (the Task 1 Step 2 method, three rounds), and the `env_profiles.macos` levers in
@@ -1631,8 +1641,8 @@ banner.
    → `CN=mqweb`, issuer the app-org CA, TLSv1.3.
 5. **No REST leftovers:** `mqlab rest` → "No such command"; `grep -rn pymqrest pyproject.toml` →
    empty.
-6. **The spike's deferred Console checks** (spec §3.1), in a browser on macOS/arm64 and cloud
-   x86, logged in as `mqadmin`/`mqadmin`. Screenshot into the temp bucket
+6. **The spike's deferred Console checks** (spec §3.1), in a browser on macOS/arm64 (against
+   `nativeha-ubuntu`; RHEL is x86-only, spec §4) and cloud x86, logged in as `mqadmin`/`mqadmin`. Screenshot into the temp bucket
    (`mqlab build path temp`) and describe in the findings document:
    - whether the Native HA and replication status views [S7] render on the active instance;
    - what a replica shows (an error, read-only, or a "standby" banner);
