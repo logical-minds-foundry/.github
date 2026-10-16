@@ -31,7 +31,23 @@ a local TCP forwarder to it.
 Spec section numbers are cited as `spec §N`.
 
 **Issue numbers.** `#<T1>` … `#<T7>` stand for the lab issues filed from this plan (epic-create
-step 9). Each implementer substitutes their own issue number in commit messages and comments.
+step 9): T1 = lab#1499, T2 = #1500, T3 = #1501, T4 = #1502, T5 = #1503, T6 = #1504, T7 = #1505.
+Each implementer substitutes their own issue number in commit messages and comments. The two
+spike-found bug tasks, lab#1569 and #1570, are described under
+[Spike-found bug tasks](#spike-found-bug-tasks-independent).
+
+## Validation sequencing (amended after the spike, `.github#358`)
+
+- **T1 ran on cloud x86 only.** Its results are in the lab's
+  `docs/reference/mqweb-spike-findings.md` and spec §3.1. With the spec amendment the gate is
+  **PASS on cloud x86**, and those results gate T2 and T3.
+- **The macOS/arm64 half is deferred** to end-of-epic validation: T6 runs the arm64 cold rebuild
+  and the cost measurements, and T7 checks the Console views in a browser. The macOS lab is busy
+  with another effort, and the human accepts the small risk that arm64 differs (spec §7).
+- **A macOS surprise in T6 or T7 pauses the epic** for discussion, exactly as a T1 surprise
+  would have (spec §3).
+- **The bug tasks lab#1569 and #1570** are independent of T2–T5 and can run in parallel with
+  them.
 
 ## Global Constraints
 
@@ -41,7 +57,13 @@ step 9). Each implementer substitutes their own issue number in commit messages 
   reason and risk.
 - **Human logins are password = username:** `mqadmin`/`mqadmin`, `mqreadonly`/`mqreadonly`,
   `mqoperator`/`mqoperator`.
+- **Console logins stay trivially easy** at the operator-facing edge (spec §2.2): the admin
+  logs in as `mqadmin`/`mqadmin`. Security inside the lab is modelled properly.
 - **No machine REST identity.** The state probe authenticates as `mqreadonly`.
+- **REST version and discovery.** `REST_API_VERSION=v3` (T1). Native HA discovery uses the
+  **list** query `GET /ibmmq/rest/v3/admin/qmgr?attributes=*` and the spec §2.3 "follow the
+  active" classification. Never use the per-QM query `GET …/admin/qmgr/<QM>` for discovery: it
+  answers HTTP 500 (reason 2543) on every healthy non-active instance (spike findings §4.2).
 - **Roles:**
   - `mqadmin` → `MQWebAdmin`;
   - `mqreadonly` → `MQWebAdminRO`;
@@ -77,17 +99,27 @@ exercises. Each one's test is added to the task that owns the code.
 
 1. **Re-provisioning a live lab must not restart mqweb.** A second render of `mqwebuser.xml` must
    be byte-identical. *Test:* Task 2, Step 6 renders twice and compares.
-2. **Native HA with no instance reporting `running`**, for example mid-election: `console open`
-   must fail loudly and name the stack. It must not forward to a replica or pick the first
-   candidate. *Test:* Task 5, `test_resolve_live_raises_when_none_running`.
-3. **A candidate that is unreachable or refuses TLS** (a node down during failover) is skipped,
-   not fatal, as long as another candidate reports `running`. *Test:* Task 5,
-   `test_resolve_live_skips_unreachable_candidate`.
+2. **Native HA with no instance reporting `running`**, for example mid-election or on the CRR
+   recovery site: `console open` must fail loudly and name the queue manager and each
+   candidate's answer. It must not forward to a replica or pick the first candidate. *Tests:*
+   Task 5, `test_resolve_live_raises_when_none_running` and
+   `test_resolve_live_raises_on_recovery_site`.
+3. **A candidate that is unreachable, refuses TLS, or gives an unknown answer** (a node down
+   during failover) is skipped, not fatal, as long as another candidate reports `running`.
+   *Tests:* Task 5, `test_resolve_live_skips_unreachable_candidate`,
+   `test_resolve_live_skips_unknown_answer` and `test_qm_state_tls_failure_is_skipped`.
 4. **A new QM-bearing play that forgets `mq-authz-accounts`** would silently break `mqoperator` on
    that arm. *Test:* Task 3, `test_every_qm_play_applies_authz_accounts`.
 5. **The local forwarder port is already in use** (a previous `console open` is still running):
    replace the old forwarder, which the user re-runs after a failover, rather than fail with a raw
    `EADDRINUSE`. *Test:* Task 5, `test_forwarder_replaces_previous_unit`.
+6. **A healthy replica or recovery-group leader must be skipped, never treated as a login
+   failure.** The spike found that the per-QM query answers HTTP 500 there, and the original
+   probe would have aborted on it. Only HTTP 401/403 on the list query is fatal. *Tests:* Task 5,
+   `test_qm_state_uses_list_query_and_selects_by_name`,
+   `test_qm_state_reports_recovery_group_leader`,
+   `test_resolve_live_skips_recovery_group_leader` and
+   `test_qm_state_http_500_is_never_an_auth_failure`.
 
 ## File map
 
@@ -124,11 +156,20 @@ exercises. Each one's test is added to the task that owns the code.
 **Kind:** implementation that ships a findings document; no product code. **Issue repo:** lab.
 **Blocked by:** `.github#342`.
 
+**Status (amended, `.github#358`).** The cloud x86 half has run. The bootstrap was one pass in
+29 min 22 s; first start was about 21 s per node and warm restart about 6.6 s median; Java RSS was
+about 245 MB at ready, settling to about 170 MB. `REST_API_VERSION=v3`. The provisional PAUSE
+(the per-QM query answers HTTP 500 on replicas) is resolved by spec §2.3's "follow the active"
+algorithm, and the gate is **PASS on cloud x86** (spec §3.1). The **macOS/arm64 half** of Steps
+1–3 is deferred: its cold rebuild, cost figures and REST table re-run move to Task 6, and the
+Console screenshots move to Task 7. The steps below are kept as the record of the method; Step 3's
+per-QM `curl` is the query that exposed the surprise.
+
 **Files:**
 
 - Create: `docs/reference/mqweb-spike-findings.md`
 - Modify: the spec (`.github` repo, `epics/341-mqweb-first-class/spec.md`) — §3 answers and §8,
-  in a follow-up `.github` PR under `#342`'s branch or a new docs task.
+  in a follow-up `.github` PR. Done for cloud x86 by the docs task `.github#358`.
 
 **Interfaces:**
 
@@ -200,7 +241,7 @@ exercises. Each one's test is added to the task that owns the code.
 
 ### Task 2: Registry and roles — 3 users, IBM roles, encode-once passwords, no anonymous
 
-**Issue repo:** lab. **Blocked by:** T1 (PASS).
+**Issue repo:** lab. **Blocked by:** T1 (PASS on cloud x86, spec §3.1).
 
 **Files:**
 
@@ -209,8 +250,8 @@ exercises. Each one's test is added to the task that owns the code.
 - Modify: `ansible/roles/mqweb/tasks/main.yml` (include `encode.yml` before the
   `mqweb basic registry` task)
 - Modify: `ansible/roles/mqweb/defaults/main.yml`, `ansible/group_vars/all/lab-ui.yml`,
-  `ansible/group_vars/all/admin.yml`, `lab/topology.yaml` (`secrets:` lines 348, 365, 381, 405)
-- Modify: `src/mqlab/cli.py` (the provision secret block near line 2737)
+  `ansible/group_vars/all/admin.yml`, `lab/topology.yaml` (the four `secrets:` lines carrying `mqweb_admin_password`, at 348, 374, 391 and 416 on `develop` as of 2026-10-16)
+- Modify: `src/mqlab/cli.py` (the provision secret block, `for secret in stack.secrets:`, near line 2855)
 - Test: `tests/test_mqweb_registry.py`
 
 **Interfaces:**
@@ -640,7 +681,7 @@ exercises. Each one's test is added to the task that owns the code.
 
 ### Task 3: `mqoperator` — OS account on every QM node, IBM-minimum grants on every QM
 
-**Issue repo:** lab. **Blocked by:** T1 (PASS).
+**Issue repo:** lab. **Blocked by:** T1 (PASS on cloud x86, spec §3.1).
 
 **Files:**
 
@@ -1008,12 +1049,16 @@ exercises. Each one's test is added to the task that owns the code.
 
 **Interfaces:**
 
-- Consumes: Task 1's `REST_API_VERSION`, and the `mqreadonly` / `mqreadonly` login from Task 2.
+- Consumes: Task 1's `REST_API_VERSION=v3`, the spec §2.3 "follow the active" algorithm, and the
+  `mqreadonly` / `mqreadonly` login from Task 2.
 - Produces:
   - `mqweb_endpoints.lab_mqweb_endpoints() -> list[dict[str, Any]]`, the same record shape as
     before;
-  - `mqweb_probe.qm_state(url: str, qm: str, *, user: str, password: str, cafile: Path, timeout: float = 5.0) -> str | None`;
-  - `mqweb_probe.resolve_live(urls: list[str], qm: str, *, state_fn: Callable[[str, str], str | None]) -> str`;
+  - `mqweb_probe.Answer(state: str | None, detail: str)`, one candidate's answer;
+  - `mqweb_probe.classify(state: object) -> Literal["live", "member", "unknown"]`;
+  - `mqweb_probe.qm_state(url: str, qm: str, *, user: str, password: str, cafile: Path | None, timeout: float = 5.0) -> Answer`,
+    which asks the list query and selects the record by `name`;
+  - `mqweb_probe.resolve_live(urls: list[str], qm: str, *, state_fn: Callable[[str, str], Answer]) -> str`;
   - `mqweb_probe.ProbeError`;
   - `console.FORWARD_PORT = 19443`;
   - `console.forward_argv(target_url: str) -> list[str]`;
@@ -1040,53 +1085,199 @@ exercises. Each one's test is added to the task that owns the code.
 
   import pytest
 
+  import json
+  import ssl
+  from urllib.error import URLError
+
   from mqlab import mqweb_probe as p
 
   URLS = ["https://10.10.1.91:9443", "https://10.10.1.92:9443", "https://10.10.1.93:9443"]
+  QM = "NHARCAPP"
+
+
+  def _ans(state: str | None) -> p.Answer:
+      return p.Answer(state, state or "unreachable (refused)")
+
+
+  def _fn(states: dict[str, str | None]):
+      return lambda u, q: _ans(states[u])
+
+
+  def _list_body(*records: dict[str, object]) -> bytes:
+      return json.dumps({"qmgr": list(records)}).encode()
+
+
+  def _probe(monkeypatch: pytest.MonkeyPatch, get) -> p.Answer:
+      monkeypatch.setattr(p, "_get", get)
+      return p.qm_state("https://h:9443", QM, user="u", password="p", cafile=None)
+
+
+  # --- classification (spec §2.3 step 3) ---------------------------------------------------
+
+
+  def test_classify_follows_the_spec_table() -> None:
+      assert p.classify("running") == "live"
+      assert p.classify("replica") == "member"
+      assert p.classify("recoveryGroupLeader") == "member"
+      for other in ("ended", "starting", "", None, 42):
+          assert p.classify(other) == "unknown"
+
+
+  # --- resolve_live (spec §2.3 steps 3-4) --------------------------------------------------
 
 
   def test_resolve_live_picks_running() -> None:
       states = {URLS[0]: "replica", URLS[1]: "running", URLS[2]: "replica"}
-      assert p.resolve_live(URLS, "NHARCAPP", state_fn=lambda u, q: states[u]) == URLS[1]
+      assert p.resolve_live(URLS, QM, state_fn=_fn(states)) == URLS[1]
+
+
+  def test_resolve_live_skips_recovery_group_leader() -> None:
+      # Review Focus 6: the CRR leader is a valid non-live member, skipped without error.
+      states = {URLS[0]: "recoveryGroupLeader", URLS[1]: "replica", URLS[2]: "running"}
+      assert p.resolve_live(URLS, QM, state_fn=_fn(states)) == URLS[2]
 
 
   def test_resolve_live_skips_unreachable_candidate() -> None:
-      # Review Focus 3: a down node (None) is skipped, not fatal.
+      # Review Focus 3: a down node is skipped, not fatal.
       states = {URLS[0]: None, URLS[1]: "replica", URLS[2]: "running"}
-      assert p.resolve_live(URLS, "NHARCAPP", state_fn=lambda u, q: states[u]) == URLS[2]
+      assert p.resolve_live(URLS, QM, state_fn=_fn(states)) == URLS[2]
+
+
+  def test_resolve_live_skips_unknown_answer() -> None:
+      # Review Focus 3: an unknown state (or an HTTP 500 answer) is skipped, not fatal.
+      answers = {URLS[0]: p.Answer("ended", "ended"), URLS[1]: p.Answer(None, "HTTP 500"),
+                 URLS[2]: p.Answer("running", "running")}
+      assert p.resolve_live(URLS, QM, state_fn=lambda u, q: answers[u]) == URLS[2]
 
 
   def test_resolve_live_raises_when_none_running() -> None:
-      # Review Focus 2: mid-election, never forward to a replica.
-      with pytest.raises(p.ProbeError, match=r"NHARCAPP: no candidate reports 'running'.*replica"):
-          p.resolve_live(URLS, "NHARCAPP", state_fn=lambda u, q: "replica")
+      # Review Focus 2: mid-election, never forward to a replica; name every answer.
+      states = {URLS[0]: "replica", URLS[1]: None, URLS[2]: "replica"}
+      with pytest.raises(p.ProbeError, match=r"NHARCAPP: no candidate reports 'running'") as exc:
+          p.resolve_live(URLS, QM, state_fn=_fn(states))
+      msg = str(exc.value)
+      assert f"{URLS[0]}=replica [member]" in msg
+      assert f"{URLS[1]}=unreachable (refused) [unknown]" in msg
+
+
+  def test_resolve_live_raises_on_recovery_site() -> None:
+      # Review Focus 2: the CRR recovery site has no live instance until a switchover.
+      states = {URLS[0]: "recoveryGroupLeader", URLS[1]: "replica", URLS[2]: "replica"}
+      with pytest.raises(p.ProbeError, match=r"recoveryGroupLeader \[member\]"):
+          p.resolve_live(URLS, QM, state_fn=_fn(states))
 
 
   def test_resolve_live_single_vip_still_probed() -> None:
       with pytest.raises(p.ProbeError):
-          p.resolve_live(URLS[:1], "RDQMAPP", state_fn=lambda u, q: None)
+          p.resolve_live(URLS[:1], "RDQMAPP", state_fn=lambda u, q: _ans(None))
 
 
-  def test_qm_state_parses_rest_payload(monkeypatch: pytest.MonkeyPatch) -> None:
-      body = b'{"qmgr":[{"name":"NHARCAPP","state":"running"}]}'
-      monkeypatch.setattr(p, "_get", lambda url, **kw: body)
-      assert p.qm_state("https://h:9443", "NHARCAPP", user="u", password="p", cafile=None) == "running"
+  # --- qm_state (spec §2.3 steps 1-3) ------------------------------------------------------
 
 
-  def test_qm_state_returns_none_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
+  def test_qm_state_uses_list_query_and_selects_by_name(monkeypatch: pytest.MonkeyPatch) -> None:
+      # Review Focus 6: the LIST query, never the per-QM one; select by name, not by position.
+      seen: list[str] = []
+
+      def get(url: str, **kw: object) -> bytes:
+          seen.append(url)
+          return _list_body({"name": "OTHERQM", "state": "running"}, {"name": QM, "state": "replica"})
+
+      assert _probe(monkeypatch, get) == p.Answer("replica", "replica")
+      assert seen == ["https://h:9443/ibmmq/rest/v3/admin/qmgr?attributes=*"]
+
+
+  def test_qm_state_reports_recovery_group_leader(monkeypatch: pytest.MonkeyPatch) -> None:
+      body = _list_body({"name": QM, "state": "recoveryGroupLeader"})
+      assert _probe(monkeypatch, lambda url, **kw: body).state == "recoveryGroupLeader"
+
+
+  def test_qm_state_reports_running(monkeypatch: pytest.MonkeyPatch) -> None:
+      body = _list_body({"name": QM, "state": "running"})
+      assert _probe(monkeypatch, lambda url, **kw: body) == p.Answer("running", "running")
+
+
+  def test_qm_state_without_a_record_for_the_qm_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+      body = _list_body({"name": "OTHERQM", "state": "running"})
+      ans = _probe(monkeypatch, lambda url, **kw: body)
+      assert ans.state is None
+      assert ans.detail == f"no {QM} record"
+
+
+  def test_qm_state_unparseable_body_is_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
+      for body in (b"<html>", b"[]"):
+          ans = _probe(monkeypatch, lambda url, _b=body, **kw: _b)
+          assert ans.state is None
+          assert ans.detail.startswith("unparseable answer")
+
+
+  def test_qm_state_unreachable_on_connection_error(monkeypatch: pytest.MonkeyPatch) -> None:
       def boom(url: str, **kw: object) -> bytes:
           raise OSError("refused")
-      monkeypatch.setattr(p, "_get", boom)
-      assert p.qm_state("https://h:9443", "Q", user="u", password="p", cafile=None) is None
+      ans = _probe(monkeypatch, boom)
+      assert ans.state is None
+      assert ans.detail == "unreachable (refused)"
 
 
-  def test_qm_state_raises_on_auth_failure(monkeypatch: pytest.MonkeyPatch) -> None:
-      # 401/403 is a misconfiguration, not "node down": fail loud, never mask it as None.
+  def test_qm_state_tls_failure_is_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+      # Review Focus 3: a TLS failure (wrong chain) is "unreachable", skipped, not fatal.
+      def bad_tls(url: str, **kw: object) -> bytes:
+          raise URLError(ssl.SSLCertVerificationError("certificate verify failed"))
+      ans = _probe(monkeypatch, bad_tls)
+      assert ans.state is None
+      assert ans.detail.startswith("unreachable")
+
+
+  @pytest.mark.parametrize("code", [401, 403])
+  def test_qm_state_raises_on_auth_failure(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+      # 401/403 on the list query is a misconfiguration, not "node down": fail loud.
       def denied(url: str, **kw: object) -> bytes:
-          raise p.HTTPError(url, 401, "Unauthorized", None, None)  # type: ignore[arg-type]
-      monkeypatch.setattr(p, "_get", denied)
-      with pytest.raises(p.ProbeError, match="401"):
-          p.qm_state("https://h:9443", "Q", user="u", password="p", cafile=None)
+          raise p.HTTPError(url, code, "denied", None, None)  # type: ignore[arg-type]
+      with pytest.raises(p.ProbeError, match=f"HTTP {code}.*check the mqweb login"):
+          _probe(monkeypatch, denied)
+
+
+  def test_qm_state_http_500_is_never_an_auth_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+      # Review Focus 6: the spike saw HTTP 500 (MQWB0004E, reason 2543) from the per-QM query on
+      # every healthy replica. Any non-auth HTTP error is an unknown answer, skipped, never fatal.
+      def err(url: str, **kw: object) -> bytes:
+          raise p.HTTPError(url, 500, "MQWB0004E", None, None)  # type: ignore[arg-type]
+      ans = _probe(monkeypatch, err)
+      assert ans == p.Answer(None, "HTTP 500")
+      assert p.classify(ans.state) == "unknown"
+
+
+  # --- _get (100% branch coverage) ----------------------------------------------------------
+
+
+  def test_get_sends_basic_auth_and_skips_only_the_hostname_check(
+      monkeypatch: pytest.MonkeyPatch,
+  ) -> None:
+      # Spec §2.3 probe TLS decision: verify the chain, not the hostname (CN=mqweb, no IP SAN).
+      seen: dict[str, object] = {}
+
+      class _Resp:
+          def __enter__(self) -> _Resp:
+              return self
+
+          def __exit__(self, *a: object) -> None:
+              return None
+
+          def read(self) -> bytes:
+              return b"{}"
+
+      def fake_urlopen(req, *, timeout: float, context: ssl.SSLContext) -> _Resp:
+          seen.update(auth=req.get_header("Authorization"), ctx=context, timeout=timeout)
+          return _Resp()
+
+      monkeypatch.setattr(p.urllib.request, "urlopen", fake_urlopen)
+      assert p._get("https://h:9443/x", user="u", password="p", cafile=None, timeout=2.0) == b"{}"
+      assert seen["auth"] == "Basic dTpw"  # base64("u:p")
+      assert seen["timeout"] == 2.0
+      ctx = seen["ctx"]
+      assert isinstance(ctx, ssl.SSLContext)
+      assert ctx.check_hostname is False
+      assert ctx.verify_mode == ssl.CERT_REQUIRED
   ```
 
 - [ ] **Step 3: Run it and confirm it fails.**
@@ -1095,12 +1286,16 @@ exercises. Each one's test is added to the task that owns the code.
 - [ ] **Step 4: Implement** `src/mqlab/mqweb_probe.py`:
 
   ```python
-  """Find the live mqweb for a QM by asking each candidate for the QM's state (spec §2.3).
+  """Follow the active: find the live mqweb for a QM (epic .github#341 spec §2.3).
 
-  Native HA has no VIP: the active instance's REST reports the QM ``running``, replicas report
-  ``replica`` (lab runbook, observed). IBM's client model for Native HA is the same idea — a list
-  of addresses, use the one that accepts (S13). An unreachable candidate is skipped (a node down
-  mid-failover); an authentication failure is a misconfiguration and fails loud.
+  Native HA has no VIP, so the client must locate the active instance itself. IBM's client
+  model for Native HA is a list of addresses, using the one that accepts (S13); this is its
+  HTTP analogue. Each candidate is asked the LIST query (``GET …/admin/qmgr?attributes=*``),
+  which answers on every instance with ``running``, ``replica`` or ``recoveryGroupLeader``.
+  The per-QM query is never used: it answers HTTP 500 (MQRC 2543) on every healthy non-active
+  instance (lab spike findings §4.2). ``running`` is live; ``replica`` / ``recoveryGroupLeader``
+  are valid non-live members (skip); anything else, including transport and TLS failures, is
+  unknown (skip). HTTP 401/403 is a login misconfiguration and fails loud.
   """
 
   from __future__ import annotations
@@ -1111,15 +1306,36 @@ exercises. Each one's test is added to the task that owns the code.
   import urllib.request
   from collections.abc import Callable
   from pathlib import Path
+  from typing import Literal, NamedTuple
   from urllib.error import HTTPError
 
-  REST_API_VERSION = "v3"  # set from Task 1's findings (REST_API_VERSION=...)
+  REST_API_VERSION = "v3"  # Task 1's findings: REST_API_VERSION=v3
 
-  __all__ = ["HTTPError", "ProbeError", "qm_state", "resolve_live"]
+  LIVE_STATES = frozenset({"running"})
+  MEMBER_STATES = frozenset({"replica", "recoveryGroupLeader"})
+  AUTH_FAILURES = frozenset({401, 403})
+
+  __all__ = ["Answer", "HTTPError", "ProbeError", "classify", "qm_state", "resolve_live"]
 
 
   class ProbeError(Exception):
-      """No live mqweb could be determined (fail loud, name the QM)."""
+      """No live mqweb could be determined, or the login is wrong (fail loud, name the QM)."""
+
+
+  class Answer(NamedTuple):
+      """One candidate's answer: the QM's REST ``state`` (None if none), and a human detail."""
+
+      state: str | None
+      detail: str
+
+
+  def classify(state: object) -> Literal["live", "member", "unknown"]:
+      """Spec §2.3 step 3: running is live; replica / recoveryGroupLeader are members."""
+      if state in LIVE_STATES:
+          return "live"
+      if state in MEMBER_STATES:
+          return "member"
+      return "unknown"
 
 
   def _get(url: str, *, user: str, password: str, cafile: Path | None, timeout: float) -> bytes:
@@ -1135,32 +1351,45 @@ exercises. Each one's test is added to the task that owns the code.
 
   def qm_state(
       url: str, qm: str, *, user: str, password: str, cafile: Path | None, timeout: float = 5.0
-  ) -> str | None:
-      """The QM's state as this mqweb reports it, or None if the candidate is unreachable."""
-      endpoint = f"{url}/ibmmq/rest/{REST_API_VERSION}/admin/qmgr/{qm}"
+  ) -> Answer:
+      """This candidate's answer for ``qm``, from the list query, selected by ``name``."""
+      endpoint = f"{url}/ibmmq/rest/{REST_API_VERSION}/admin/qmgr?attributes=*"
       try:
           body = _get(endpoint, user=user, password=password, cafile=cafile, timeout=timeout)
-      except HTTPError as exc:
-          raise ProbeError(f"{qm}: {url} answered HTTP {exc.code} — check the mqweb login") from exc
-      except OSError:
-          return None
-      recs = json.loads(body).get("qmgr") or []
-      return str(recs[0].get("state")) if recs else None
+      except HTTPError as exc:  # before OSError: HTTPError is an OSError subclass
+          if exc.code in AUTH_FAILURES:
+              raise ProbeError(
+                  f"{qm}: {url} answered HTTP {exc.code} to the qmgr list query — check the mqweb login"
+              ) from exc
+          return Answer(None, f"HTTP {exc.code}")
+      except OSError as exc:  # refused, timeout, DNS, TLS (URLError wraps ssl errors)
+          return Answer(None, f"unreachable ({getattr(exc, 'reason', exc)})")
+      try:
+          recs = json.loads(body).get("qmgr") or []
+      except (ValueError, AttributeError) as exc:
+          return Answer(None, f"unparseable answer ({exc})")
+      for rec in recs:
+          if rec.get("name") == qm:
+              state = rec.get("state")
+              return Answer(state, str(state))
+      return Answer(None, f"no {qm} record")
 
 
-  def resolve_live(urls: list[str], qm: str, *, state_fn: Callable[[str, str], str | None]) -> str:
-      """The first candidate whose mqweb reports ``qm`` running; ProbeError if none does."""
+  def resolve_live(urls: list[str], qm: str, *, state_fn: Callable[[str, str], Answer]) -> str:
+      """The first candidate whose mqweb reports ``qm`` running; ProbeError naming every answer."""
       seen: list[str] = []
       for url in urls:
-          state = state_fn(url, qm)
-          if state == "running":
+          answer = state_fn(url, qm)
+          kind = classify(answer.state)
+          if kind == "live":
               return url
-          seen.append(f"{url}={state or 'unreachable'}")
+          seen.append(f"{url}={answer.detail} [{kind}]")
       raise ProbeError(f"{qm}: no candidate reports 'running' ({', '.join(seen)})")
   ```
 
-  Set `REST_API_VERSION` to the value Task 1 recorded.
-  Run: `uv run pytest tests/test_mqweb_probe.py -v` → PASS.
+  Run: `uv run pytest tests/test_mqweb_probe.py -v` → PASS. Branch coverage of
+  `mqweb_probe.py` must be 100% (the tests above exercise every branch, including a list whose
+  first record is another QM).
 
 - [ ] **Step 5: Write the failing console tests.** Create `tests/test_console.py`:
 
@@ -1346,10 +1575,22 @@ merged, so the new port forward exists; `grep -rn mqweb_enabled ansible` is empt
    repo's equivalent re-provision verb) and confirm, for Review Focus 1 and spec §6 step 7:
    - `ansible` reports `mqwebuser.xml` **unchanged** on every node;
    - `systemctl show mqweb -p ActiveEnterTimestamp` is unchanged.
+4. **The spike's deferred macOS/arm64 half** (spec §3.1). From the macOS/arm64 cold rebuild of
+   `nativeha-rhel-crr` in step 1:
+   - record the one-pass result and total wall clock, the readiness-gate wait per node
+     (`a1..a3`, `b1..b3`), `ready_s` min / median / max per node and `rss_kb` at ready and at
+     +60 s (the Task 1 Step 2 method, three rounds), and the `env_profiles.macos` levers in
+     force;
+   - re-run the spike's REST table (findings §4.2) on all six nodes, with the list query and the
+     per-QM query on `v3`, and confirm it matches cloud x86: `running` on the active instance,
+     `replica` / `recoveryGroupLeader` elsewhere on the list query, and HTTP 500 reason 2543 on
+     the per-QM query off the active instance.
 
 **Acceptance:** every bootstrap completes in one pass; every node reports `active`; the
-re-provision changes nothing. Record the figures in the result comment and append them to
-`docs/reference/mqweb-spike-findings.md` in Task 7's PR. **SUCCESS / FAILURE** go in the results
+re-provision changes nothing; the macOS/arm64 figures sit within the spike's PASS criteria and the
+REST table matches cloud x86. Any macOS difference is a surprise that pauses the epic for
+discussion (spec §3, §7). Record the figures in the result comment and fill the findings
+document's macOS sections (§1, §3.3, §6) in Task 7's PR. **SUCCESS / FAILURE** go in the results
 template.
 
 ---
@@ -1390,9 +1631,35 @@ banner.
    → `CN=mqweb`, issuer the app-org CA, TLSv1.3.
 5. **No REST leftovers:** `mqlab rest` → "No such command"; `grep -rn pymqrest pyproject.toml` →
    empty.
+6. **The spike's deferred Console checks** (spec §3.1), in a browser on macOS/arm64 and cloud
+   x86, logged in as `mqadmin`/`mqadmin`. Screenshot into the temp bucket
+   (`mqlab build path temp`) and describe in the findings document:
+   - whether the Native HA and replication status views [S7] render on the active instance;
+   - what a replica shows (an error, read-only, or a "standby" banner);
+   - that an unauthenticated browser lands on the login page.
 
 **Acceptance:** every row of spec §6 passes on every stack, svc-sim included (on svc-sim, step 3
 uses its `net-ext` endpoint only). Record SUCCESS or FAILURE per row in the result comment.
+
+---
+
+## Spike-found bug tasks (independent)
+
+The T1 spike found two lab bugs. Both are filed under epic `.github#341`, are independent of
+T2–T5, and can run in parallel with them. Drive each with `vergil:issue-implement`; the issue
+body is the specification.
+
+- **lab#1569: worktree runs fork the live-lab state bucket.** `lab/scripts/lab-secret.sh` and
+  the Ansible callers derive `build/state` from the script or playbook path, so a bootstrap run
+  from `.worktrees/<name>/` writes secrets and run records into a private copy of the state
+  bucket. The fix resolves every `build/<bucket>` path through the same authority as
+  `mqlab build path`, adds a guard test, and fails loud on a non-shared state bucket.
+- **lab#1570: `lab-secret.sh` mints secrets for option-like and unknown names.** `--help`,
+  `get` or a mistyped name silently creates a new secret. The fix rejects option-like names,
+  checks names against a registry of known secrets, removes the stray files, and adds tests.
+
+**[judgment]** Landing lab#1569 before T6 is preferable: T6's cold rebuilds should not be at risk
+of forking the state bucket. This is a recommendation, not a dependency.
 
 ---
 
