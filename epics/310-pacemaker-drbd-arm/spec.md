@@ -239,7 +239,8 @@ from interpretation (data vs. judgment), with checkable citations.
 - **Unit tests** (within `vrg-validate`): the stack registry entry, the parity matrix
   row, and any Python helpers, at the repo's 100% branch-coverage gate.
 - **DKMS early proof:** the bake task must show the DRBD 9 module **loading** on the
-  lab's Ubuntu 24.04 kernel on the dev host's architecture before HA work starts.
+  lab's Ubuntu 24.04 and 26.04 kernels on the dev host's architecture before HA
+  work starts.
 - **Cold-rebuild acceptance:** a full VM cold rebuild brings the new arm up in one
   pass (the repo's standing acceptance gate for bring-up/provisioning changes).
 - **Drill set** — identical procedures run against **both** `rdqm-rhel` and
@@ -247,12 +248,17 @@ from interpretation (data vs. judgment), with checkable citations.
   1. Controlled `qm down` / `qm up`, with `mqlab qm e2e` before and after.
   2. Hard kill of the active node (`virsh destroy`).
   3. Partition of the HA replication network (`lab/scripts/net-down.sh net-hb-a`).
+     A companion drill (3b in the plan) cuts `net-wan` instead and records whether
+     the live primary keeps **DR** quorum (`quorum majority` over the stacked DR
+     resource's 2 members) and keeps serving.
   4. Loss of 2 of 3 HA nodes — quorum-loss behavior must match RDQM's.
   5. DR cutover and failback via `mqlab dr cutover|failback <stack> --rpo0-drill`
      (the same command on both arms, per D6).
   6. Forced DR with a degraded replication link (`lab/scripts/drbd-degrade.sh`).
      The script defaults to the SAN arm's `san-a` / `mqlun`, so the drill always
      passes the node and DRBD resource explicitly for each arm.
+  7. RDQM arm only: a read-only probe of what the undocumented `ocf:ibm:rdqmx`
+     agent does (no open-source counterpart is built either way).
 - **Parity matrix accuracy:** the `rdqm-rhel` row of `MATRIX` currently reads
   `not_yet` for every verb, which predates the RDQM work since; task 9 corrects it
   from the drill evidence so the comparison report does not cite a stale matrix.
@@ -271,7 +277,8 @@ Epic home: `logical-minds-foundry/.github` (the member repo is public).
 | 5 | Site-A HA formation from the blueprint (`pdrbd-qm`): VG, per-QM LV/DRBD/filesystem, Pacemaker group, `qm-*` verbs, plus the distributed workload with its TLS and authz | impl | member | 2, 3, 4 |
 | 6 | DR: site B joins; `dr-cutover` / `dr-failback` playbooks | impl | member | 5, 6a |
 | 6a | `mqlab dr` dispatches on stack verbs; `--rpo0-drill` generalised (D6) | impl | member | D |
-| 7 | Cold rebuild brings the new arm up in one pass | validation | member | 6 |
+| 6b | DRBD kernel TLS (`tlshd`) on the HA and DR resources (`mq-resiliency-lab-for-linux#1609`) | impl | member | 6 |
+| 7 | Cold rebuild brings the new arm up in one pass | validation | member | 6b |
 | 8 | Drill set on `rdqm-rhel` and `pcmk-drbd-ubuntu`, results recorded | validation | member | 7 |
 | 9 | Comparison report + finalized deviation ledger; correct the `rdqm-rhel` parity row from the drill evidence | impl (docs) | member | 8 |
 | 10 | `pacemaker-san` decision (retire / demote / extract), recorded as a decision doc; retirement or extraction becomes its own follow-on epic | impl (decision doc) | member | 9 |
