@@ -334,6 +334,10 @@ results in the lab's `docs/reference/mqweb-spike-findings.md`. The nodes were 2 
    - First start, measured by the role's readiness gate: about **21 s per node**. With the gate
      run serially, the six-node arm adds about 2 min.
    - Warm restart: median about **6.6 s**, at most 8.4 s.
+     - **[judgment]** The figure probably spans the whole restart. The plan's method starts the
+       clock after `systemctl restart` returns, and timed that way it reads well under a second.
+       The spike did not record its exact command, so this is unconfirmed; the lab's findings §2.3
+       and §7 carry a re-time item. No criterion depends on it.
    - Java RSS: about **245 MB at ready**, settling to about **170 MB** within 60 s. About 1 GB
      stays available on each 2 GiB node.
    - **[judgment]** Per-node mqweb is cheap on cloud x86, and D3 (§8) holds there.
@@ -348,6 +352,7 @@ results in the lab's `docs/reference/mqweb-spike-findings.md`. The nodes were 2 
      retires anonymous access.
    - Still open: whether the Native HA and replication status views [S7] render on the active
      instance, and what a replica shows after login. They need a browser and move to T7.
+     (Answered in §3.2, item 3.)
 3. **REST version.** [data, findings §5] `v1`, `v2` and `v3` answer identically on 10.0.1.0;
    `v4` answers 404. **`REST_API_VERSION=v3`** [judgment: the version the 10.0.x documentation
    uses].
@@ -365,6 +370,47 @@ probe used the per-QM query and would have treated a healthy replica's HTTP 500 
   x86-only (§4, `.github#360`).
 - **[decision]** The cloud x86 results gate T2 and T3. With this amendment the gate is **PASS on
   cloud x86**.
+
+### 3.2 The deferred answers (macOS/arm64 in T6; the Console views)
+
+T6 ([lab#1595](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/1595),
+SUCCESS) ran the arm64 half on the local Lima VM on Apple silicon, with Ubuntu QM nodes at 2 vCPU /
+2 GiB. The figures are in the lab's findings §3.3 and §4.6 (filled by
+[lab#1614](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/1614)).
+
+1. **Cost and one-pass rebuild.** [data, findings §3.3]
+   - `pcmk-ubuntu` and `nativeha-ubuntu` each bootstrapped in **one pass** (35 min 36 s and
+     19 min 56 s). A later `nativeha-ubuntu` cold rebuild took 16 min 15 s, also in one pass.
+   - First start, measured by the readiness gate: **9–10 s per node**.
+   - Restart to ready: **3.3–6.7 s**, with the clock started before the restart. As the plan
+     writes it, `ready_s` reads 0.07–0.32 s (§3.1 note).
+   - Java RSS: about **245–275 MB at ready**, settling to about **180–240 MB** within 60 s.
+   - **[judgment]** Per-node mqweb is cheap on arm64 too, and D3 (§8) holds there. The platforms
+     ran different stacks, so this checks the criteria; it is not a benchmark between them.
+2. **Native HA replica behaviour.** [data, findings §4.6] The REST table on `nativeha-ubuntu`
+   (`NHAUAPP`) matches cloud x86 exactly: the list query reports `running`, `replica` or
+   `recoveryGroupLeader`, and the per-QM query answers HTTP 500 (reason 2543) on every non-active
+   instance.
+3. **Console in a browser.** [data, findings §4.5 and §4.6]
+   - Cloud x86, checked in a browser after the spike on 2026-10-16 (this answers the item §3.1
+     left open): only the active instance's Console can open the queue manager. A replica or the
+     recovery-group leader lists it with its Native HA role and does not open it. 10.0.1.0 has no
+     separate Native HA or replication status view.
+   - macOS/arm64: a bare `/ibmmq/console/` visit now redirects to the login page, which confirms
+     T2's retirement of anonymous access. All three role logins work. A forward left on a replica
+     after a failover shows the replica behaviour above, and re-running `mqlab console open` moves
+     it to the active instance.
+4. **A host difference, not an mqweb one.** [data, findings §3.3] While the stacks were up, the
+   Mac's cores were oversubscribed by its running VMs. The nested guests froze for 3–163 s:
+   Pacemaker fenced nodes and Native HA failed over, and both recovered by themselves. With mqweb
+   stopped on every QM node the stalls continued. Root cause:
+   [lab#1602](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/1602),
+   which shipped `mqlab vm starvation` to name the condition.
+   - **[decision]** The human accepted it as a constraint of a single-workstation lab. The lab
+     moves to a larger host later; the VMs are not shrunk.
+
+**Verdict: PASS on macOS/arm64** [data, findings §6]. Every criterion is met, and T6 raised no
+deviation from IBM guidance (§8).
 
 ## 4. Scope
 
@@ -461,6 +507,8 @@ The following run on a cold-rebuilt lab, for every stack and both sites:
     rebuild on macOS is the check. If it fails, the epic pauses for discussion, as T1 would have.
   - On arm64 the check runs on the Ubuntu stacks, with `nativeha-ubuntu` standing in for
     `nativeha-rhel-crr` (§4).
+  - **Retired by T6** (§3.2): the macOS cold rebuilds ran in one pass, and arm64 did not differ
+    materially. The host CPU starvation T6 met is a host constraint, not this risk.
 - **The REST v2 → v3 move.** The only consumers this epic leaves are the state probe and the
   runbook. Settled by T1: `v3` (§3.1).
 - **[data]** With RDQM, the Console shows nothing RDQM-specific, and Pacemaker-style external HA
@@ -472,11 +520,12 @@ The following run on a cold-rebuilt lab, for every stack and both sites:
 |---|---|---|---|---|
 | D1 | `httpHost` defaults to `localhost` [S11] | `*` | The VIP floats, so mqweb must answer on the VIP whichever node holds it (epic #39 §5) | mqweb answers on every NIC, including management. Plane enforcement is deferred lab-wide |
 | D2 | Basic-registry users with real passwords (implied by [S9, S10]) | Human logins use password = username | Ephemeral lab with no data; frictionless human use; all mechanisms stay wired (§2.2) | None beyond rebuilding the lab. **Never carry this to a real deployment** |
-| D3 | mqweb normally runs where its queue managers are administered, with no stated sizing [S11] | Six or more Liberty JVMs on 2-vCPU nested-virtualization nodes | Lab scale | Cold-start contention. Measured by T1 on cloud x86: about 21 s first start and about 170 MB steady RSS per node (§3.1). macOS/arm64 is measured by T6, on the Ubuntu stacks (§4) |
+| D3 | mqweb normally runs where its queue managers are administered, with no stated sizing [S11] | Six or more Liberty JVMs on 2-vCPU nested-virtualization nodes | Lab scale | Cold-start contention. Measured by T1 on cloud x86: about 21 s first start and about 170 MB steady RSS per node (§3.1). Measured by T6 on macOS/arm64 (Ubuntu stacks, §4): 9–10 s first start and about 180–240 MB steady RSS per node (§3.2) |
 
-**T1 added no deviation [data, findings §6].** The replica behaviour in §2.3 is not a deviation:
-IBM prescribes no REST discovery method for Native HA, and the "follow the active" algorithm
-applies IBM's address-list model [S13] [judgment]. Anything T6 or T7 finds on macOS/arm64 that
+**T1 and T6 added no deviation [data, findings §6].** The replica behaviour in §2.3 is not a
+deviation: IBM prescribes no REST discovery method for Native HA, and the "follow the active"
+algorithm applies IBM's address-list model [S13] [judgment]. The host CPU starvation T6 met on
+macOS (§3.2, item 4) comes from the host and involves no IBM guidance. Anything T7 finds that
 departs from IBM guidance is added here.
 
 ## 9. Relationships
