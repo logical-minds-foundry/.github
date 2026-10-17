@@ -360,7 +360,9 @@ probe used the per-QM query and would have treated a healthy replica's HTTP 500 
 - **[decision]** The macOS/arm64 half of the spike is **deferred** to end-of-epic validation and
   folded into T6 (cold rebuild, cost figures, the REST table re-run) and T7 (the Console views in
   a browser). The macOS lab is busy with another effort, and the human accepts the small risk that
-  arm64 behaves differently from x86 (§7).
+  arm64 behaves differently from x86 (§7). On arm64 that half runs on **`nativeha-ubuntu`**, the
+  native arm64 Native HA + CRR arm (QM `NHAUAPP`), not `nativeha-rhel-crr`: the RHEL stacks are
+  x86-only (§4, `.github#360`).
 - **[decision]** The cloud x86 results gate T2 and T3. With this amendment the gate is **PASS on
   cloud x86**.
 
@@ -371,7 +373,17 @@ probe used the per-QM query and would have treated a healthy replica's HTTP 500 
 - every registered stack in `lab/topology.yaml`: `pcmk-ubuntu`, `rdqm-rhel`, `nativeha-ubuntu`,
   `nativeha-rhel-crr`, and svc-sim;
 - both sites;
-- macOS/arm64 and cloud x86.
+- macOS/arm64 and cloud x86, under the lab's platform policy:
+  - **cloud x86:** every stack above, RHEL and Ubuntu;
+  - **macOS/arm64:** the Ubuntu stacks (`pcmk-ubuntu`, `nativeha-ubuntu`) and svc-sim only.
+  - **[data]** IBM ships MQ for RHEL on x86 only, so there are no RHEL-on-ARM MQ binaries,
+    although RHEL itself runs on ARM. IBM does ship MQ for Ubuntu on ARM. `mqlab bootstrap`
+    refuses a RHEL stack on an aarch64 host
+    ([lab#847](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/847)).
+  - **[note]** Earlier drafts sent the macOS/arm64 checks to the RHEL stacks. That was an
+    oversight, which surfaced when
+    [lab#1595](https://github.com/logical-minds-foundry/mq-resiliency-lab-for-linux/issues/1595)
+    ran. `.github#360` corrected it.
 
 **Out of scope:**
 
@@ -434,7 +446,8 @@ The following run on a cold-rebuilt lab, for every stack and both sites:
 6. **TLS.** The served certificate is the org-CA `mqweb` certificate, using TLS 1.3.
 7. **Idempotent.** Re-provisioning a live lab neither changes `mqwebuser.xml` nor restarts mqweb.
 8. **Cold rebuild.** The bootstrap is one-pass, and cold-start and memory figures are recorded,
-   on macOS/arm64 as well as cloud x86 (the spike measured cloud x86 only; §3.1).
+   on macOS/arm64 (Ubuntu stacks only, §4) as well as cloud x86 (the spike measured cloud x86
+   only; §3.1).
 
 ## 7. Risks
 
@@ -446,6 +459,8 @@ The following run on a cold-rebuilt lab, for every stack and both sites:
   - **[decision]** The human accepts this risk as small.
   - **[judgment]** The historic macOS failure (#1154) happened at cold start, so T6's cold
     rebuild on macOS is the check. If it fails, the epic pauses for discussion, as T1 would have.
+  - On arm64 the check runs on the Ubuntu stacks, with `nativeha-ubuntu` standing in for
+    `nativeha-rhel-crr` (§4).
 - **The REST v2 → v3 move.** The only consumers this epic leaves are the state probe and the
   runbook. Settled by T1: `v3` (§3.1).
 - **[data]** With RDQM, the Console shows nothing RDQM-specific, and Pacemaker-style external HA
@@ -457,7 +472,7 @@ The following run on a cold-rebuilt lab, for every stack and both sites:
 |---|---|---|---|---|
 | D1 | `httpHost` defaults to `localhost` [S11] | `*` | The VIP floats, so mqweb must answer on the VIP whichever node holds it (epic #39 §5) | mqweb answers on every NIC, including management. Plane enforcement is deferred lab-wide |
 | D2 | Basic-registry users with real passwords (implied by [S9, S10]) | Human logins use password = username | Ephemeral lab with no data; frictionless human use; all mechanisms stay wired (§2.2) | None beyond rebuilding the lab. **Never carry this to a real deployment** |
-| D3 | mqweb normally runs where its queue managers are administered, with no stated sizing [S11] | Six or more Liberty JVMs on 2-vCPU nested-virtualization nodes | Lab scale | Cold-start contention. Measured by T1 on cloud x86: about 21 s first start and about 170 MB steady RSS per node (§3.1). macOS/arm64 is measured by T6 |
+| D3 | mqweb normally runs where its queue managers are administered, with no stated sizing [S11] | Six or more Liberty JVMs on 2-vCPU nested-virtualization nodes | Lab scale | Cold-start contention. Measured by T1 on cloud x86: about 21 s first start and about 170 MB steady RSS per node (§3.1). macOS/arm64 is measured by T6, on the Ubuntu stacks (§4) |
 
 **T1 added no deviation [data, findings §6].** The replica behaviour in §2.3 is not a deviation:
 IBM prescribes no REST discovery method for Native HA, and the "follow the active" algorithm
