@@ -4,7 +4,7 @@
 
 **Goal:** Add a `pcmk-drbd-ubuntu` stack (mechanism `pacemaker-drbd`) that rebuilds RDQM's shared-nothing HA/DR architecture from upstream Corosync/Pacemaker/DRBD 9 on Ubuntu, using RDQM's captured live configuration as the blueprint, then compare it with `rdqm-rhel` on an identical drill set.
 
-**Architecture:** All implementation lands in **`logical-minds-foundry/mq-resiliency-lab-for-linux`** (this plan lives in `.github`). A read-only capture of the live RDQM arm becomes the committed blueprint (`docs/reference/rdqm-blueprint/`) and seeds a deviation ledger. A new baked box carries LINBIT's DRBD 9 (`drbd-dkms`). Two new roles (`drbd9`, `pdrbd-qm`) form a per-QM DRBD volume under Pacemaker at each site; `mqlab dr` is generalised to dispatch on each stack's own DR verbs so both arms run the DR drills with one command. The SAN arm is not touched; its fate is decided in Task 10.
+**Architecture:** All implementation lands in **`logical-minds-foundry/mq-resiliency-lab-for-linux`** (this plan lives in `.github`). A read-only capture of the live RDQM arm becomes the committed blueprint (`docs/reference/rdqm-blueprint/`) and seeds a deviation ledger. A new baked box carries LINBIT's DRBD 9 (`drbd-dkms`). Two new roles (`drbd9`, `pdrbd-qm`) form, per QM and like RDQM, a site-local HA DRBD resource under each site's own Pacemaker cluster and a DR resource stacked on top of it that replicates to the other site; `mqlab dr` is generalised to dispatch on each stack's own DR verbs so both arms run the DR drills with one command. The SAN arm is not touched; its fate is decided in Task 10.
 
 **Tech Stack:** Ansible (roles/plays, ansible-core only — no galaxy collections); DRBD 9 (`ppa:linbit/linbit-drbd9-stack`, `drbd-dkms`, `drbd-utils`); Pacemaker/Corosync/pcs (Ubuntu 24.04 archive); IBM MQ (the `lab/mq-version` pin, Ubuntu debs via `mq-install`); `mqlab` (Python 3 + Typer, pytest at 100% branch coverage); libvirt/Vagrant lab.
 
@@ -12,14 +12,14 @@
 
 ## Global Constraints
 
-- **The RDQM blueprint is authoritative.** Wherever the captured RDQM configuration shows how something is done, the open-source arm does the same with upstream parts; wherever it cannot, the deviation is a ledger row. The hypothesis values in Tasks 5–6 are replaced by blueprint values in Task 2's reconciliation step.
+- **The RDQM blueprint is authoritative.** Wherever the captured RDQM configuration shows how something is done, the open-source arm does the same with upstream parts; wherever it cannot, the deviation is a ledger row. Task 2's reconciliation (lab #1427/#1428) replaced the pre-capture hypothesis in Tasks 5–6 with blueprint values; `.github#362` rewrote those tasks for RDQM's two-resource design (see "Evidence for Tasks 5, 6 and 8").
 - **No change to `pcmk-ubuntu` / `pacemaker-san`.** `mq-pcmk-qmgr`, `drbd-san`, `iscsi-*`, `bake-pcmk-ubuntu.yml`, the `pcmk` box and the SAN networks are not modified (template symlinks in Task 5 leave `mq-pcmk-qmgr`'s files resolving exactly as before).
 - **DRBD 9 from LINBIT's PPA (`drbd-dkms`)**, never the in-kernel 8.4 module. The module is built at bake time; a node never compiles a kernel module at boot.
 - **No Booth; DR is operator-driven** (mirrors `rdqmdr`).
 - **Scope:** core + comparison, **plus** the distributed app↔SVC workload with its TLS and CHLAUTH authz (needed by `mqlab qm e2e`). Observability, exporters, and cockpit boards are out of scope except where the stack registry provides them unchanged.
 - **Functional comparison only** — no timing claims between arms.
 - **Fail loud.** No `|| true`, no `failed_when: false` on a step that does work, no swallowed errors; probes use `changed_when: false` and an explicit `failed_when`.
-- **DRBD lessons pre-applied** (`docs/reference/drbd-operations.md`): `create-md` with `</dev/null` + `timeout`; live state via `drbdadm status` (never `dump-md` on an in-use device); attach asserted via `drbdadm dstate`.
+- **DRBD lessons pre-applied** (`docs/reference/drbd-operations.md`): `create-md` with `</dev/null` + `timeout`; live state via `drbdadm status` (never `dump-md` on an in-use device); attach asserted via `drbdadm dstate`. The stacked DR resource is not listed by `drbdadm status all` (blueprint README §2.1), so its probes use `drbdsetup status`, which never blocks either.
 - **Secrets never captured or committed:** no keystores (`*.kdb`, `*.p12`, `*.sth`, `*.jks`), no corosync `authkey`, no DRBD `shared-secret` values, no passwords.
 - **Derive, never hardcode:** QM names come from the stack's `short` (`PDRBD` → `PDRBDAPP`); IPs live only in `lab/topology.yaml` and the provision playbook's lab-constant block (the existing `site-pcmk.yml` / `site-rdqm.yml` precedent).
 - **Validation gate is exactly one command:** `vrg-container-run -- vrg-validate`. Dev-loop test command: `uv run pytest …` (build-tool use only; never embedded in shipped scripts).
@@ -32,7 +32,7 @@
 
 1. **`--rpo0-drill` against a stack whose DR verb does not implement the drill** — must refuse with exit 2, never run the cutover and report success without the RPO-0 check. *(Test: Task 6a, `test_dr_rpo0_drill_refused_when_verb_does_not_declare_it`.)*
 2. **A booted node whose kernel differs from the one the DKMS module was built for** — the per-run `drbd9` half must fail loud and name the fix (rebuild the `pdrbd` box), not let `modprobe` silently fall back to the in-kernel 8.4 module. *(Test: Task 3, `test_drbd9_configure_asserts_drbd9_for_running_kernel`.)*
-3. **Re-running provision on an already-formed stack** — `create-md`, the initial promote/`mkfs`, and `crtmqm` must be skipped, never re-run over live data. *(Test: Task 5, `test_pdrbd_qm_destructive_steps_are_guarded`; live: Task 7 runs provision twice.)*
+3. **Re-running provision on an already-formed stack** — `create-md` (HA and stacked DR), the initial promotes/`mkfs`, and `crtmqm` must be skipped, never re-run over live data; and a formed QM's DR shape must never change under it. *(Test: Task 5, `test_pdrbd_qm_destructive_steps_are_guarded`, extended in Task 6 with the stacked steps, plus Task 6 `test_dr_shape_is_fixed_at_creation`; live: Task 7 runs provision twice.)*
 4. **DR cutover when the target site's disk is not UpToDate** (replication broken or lagging) — the playbook must refuse unless the operator passes an explicit force, and must say why. *(Test: Task 6, `test_dr_switch_asserts_disk_state_before_promote`; live: drill 6.)*
 5. **Capture run when RDQM is not healthy or no RDQM QM exists** — the capture must fail before writing anything, never leave a partial blueprint on disk that looks complete. *(Test: Task 1, `test_capture_preflight_precedes_every_write`.)*
 
@@ -46,6 +46,8 @@ D (#311 docs) ──┬─▶ T1 capture playbook ─▶ T2 run capture + bluepr
                                               T4 topology ◀── T2  │     T5 site-A HA ◀── T2,T3,T4
                                                                   ▼            │
                                                        T6 DR (site B + switch) ◀┘ (+T6a)
+                                                                  │
+                                                       T6b DRBD kernel TLS (lab #1609)
                                                                   │
                                                        T7 validation: cold rebuild
                                                                   │
@@ -948,12 +950,66 @@ vrg-commit --type feat --scope topology --message "pcmk-drbd-ubuntu stack: nodes
 
 ---
 
-### Task 5: Site-A HA formation (`pdrbd-qm`) + the distributed workload
+### Evidence for Tasks 5, 6 and 8 (reconciled by `.github#362`)
+
+Task 2 (lab #1425) captured the blueprint, and it contradicted this plan on a structural point: **RDQM builds HA and DR as two separate DRBD resources**, not one six-peer resource. The owner decided on 2026-10-17 (`.github#362`) to copy that design with upstream parts. Tasks 5, 6 and 8 below are rewritten to match. Every value carries its source:
+
+- **Blueprint files** are cited as `rdqm-a1/drbd-dump.txt` and similar. They are relative to the lab repo's `docs/reference/rdqm-blueprint/` (the 2026-10-16 capture: MQ 10.0.1.0, RHEL 10.2, LINBIT DRBD 9.3.3, drbd-utils 9.33.1). Its `README.md` § numbers are cited as `BP README §n`. Ledger rows are cited by ID (`RP-1`, `CL-5`, …) from `docs/reference/rdqm-vs-vanilla-deviations.md`.
+- **DRBD 9 behaviour** is cited from upstream, fetched 2026-10-17:
+  - **[UG]** *DRBD 9.0 User's Guide*, <https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/>. Sections used: "Creating a stacked 3-node setup" / "Device stacking considerations", "Internal meta data", "Configuring quorum", "Configuring multiple paths", "Automatic promotion of resources".
+  - **[conf]** `drbd.conf-9.0(5)`, <https://manpages.ubuntu.com/manpages/noble/man5/drbd.conf-9.0.5.html>.
+  - **[opts]** drbd-utils `documentation/v9/drbdsetup-options.xml`, the option text that `drbd.conf-9.0(5)` and `drbdsetup(8)` include: <https://github.com/LINBIT/drbd-utils/blob/master/documentation/v9/drbdsetup-options.xml>.
+  - **[ocf]** The `ocf:linbit:drbd` agent source: <https://github.com/LINBIT/drbd-utils/blob/master/scripts/drbd.ocf>.
+- **Pacemaker:** **[PE]** *Pacemaker Explained* 2.1, "Collective resources": <https://clusterlabs.org/projects/pacemaker/doc/2.1/Pacemaker_Explained/html/collective.html>.
+- **IBM:** `rdqmdr`, MQ 10.0.x: <https://www.ibm.com/docs/en/ibm-mq/10.0.x?topic=reference-rdqmdr-manage-dr-rdqm-instances>. *Creating DR/HA RDQMs*, MQ 10.0.x: <https://www.ibm.com/docs/en/ibm-mq/10.0.x?topic=availability-creating-drha-rdqms>. Both are cached under `refs/ibm-docs/ibm-mq/10.0.x/` in the lab's cache bucket.
+
+Claims are labelled **Data** (what a source shows) or **Judgment** (reasoning on top of it). Every judgment is a review point for the owner.
+
+**Owner decisions applied (`.github#362`, final):**
+
+1. HA and DR are separate resources. The HA resource is site-local, and the DR resource is stacked on top of it. The filesystem mounts the stacked device.
+2. The snapshot LV (DR-3) is not built.
+3. The blueprint values are adopted.
+4. Replication TLS is lab #1609, which runs after Task 6. Neither template sets `tls yes` until that task lands.
+5. The QM agent stays `systemd:mq-<QM>`. `ocf:ibm:rdqm` and `ocf:ibm:rdqmx` are ledgered as deviations.
+
+#### The shape decision: mount device and `--no-dr` (settled)
+
+**Data.**
+
+- **An HA/DR QM:** RDQM mounts the **stacked DR device**. The device stack is `vdb → drbdpool-rdqmapp_00 → drbd100 → drbd7001`, and the filesystem is on `/dev/drbd7001` (`rdqm-a1/lsblk.txt`, `rdqm-a1/mounts.txt`). Pacemaker mounts `device="/dev/drbd/by-res/rdqmapp.dr/0"` (`rdqm-a1/pcmk-config.txt`).
+- **RDQM fixes the DR role when it creates the QM.** It formats the stacked device as part of `crtmqm -sx -rr p|s`. Lab evidence: the AMQ3817E failure `mkfs.ext4 /dev/drbd/by-res/rdqmapp.dr/0` (lab `docs/reference/lab-gotchas.md`, "RDQM DR cold-create"). IBM documents the DR role as a `crtmqm` create parameter (*Creating DR/HA RDQMs*, 10.0.x: "-rr p Indicates that the initial DR role is primary").
+- **An HA-only QM has no `.dr` device at all.** The lab's `--no-dr` path creates HA-only with `crtmqm -sx -reh`, which has "no DR link (`-reh`, no `.dr` device)" (lab `lab/scripts/rdqm-qm-create.sh`; `ansible/site-rdqm.yml`).
+- **Stacked metadata shrinks the device.** "The stacked device must use internal meta data", so its usable size is slightly smaller ([UG] "Device stacking considerations"). Internal metadata is "an area at the *end* of the device", and on a device that already holds a filesystem, "the newly created metadata would overwrite data at the end of the lower-level device" unless you first "Shrink your existing file system" ([UG] "Internal meta data").
+
+**Decision.** The shape is fixed when the QM is created, from `dr_enabled`, as RDQM does with `crtmqm -rr`:
+
+| `dr_enabled` | Resources | `mkfs` and mount device (one variable, `pdrbd_fs_device`) |
+|---|---|---|
+| `false` (`bootstrap --no-dr`) | HA `<qm>` only | `/dev/drbd/by-res/<qm>/0` (minor 100) |
+| `true` (default) | HA `<qm>`, plus DR `<qm>.dr` stacked on top, at **both** sites from the start | `/dev/drbd/by-res/<qm>.dr/0` (minor 7001) |
+
+Task 5 builds the HA-only shape, which is all its `--no-dr` acceptance exercises. Task 6 adds the DR/HA shape. Changing the shape of a formed QM is **refused**: the role fails loud and tells the operator to tear down and re-create. Task 6 Step 7 already re-creates from a teardown.
+
+**Rejected: "Task 5 mounts `drbd100`, Task 6 moves the mount onto the stacked device".** It is not feasible on live data:
+
+- `drbdadm --stacked create-md` writes the stacked resource's internal metadata into the last sectors of `drbd100`. The ext4 filesystem from Task 5 spans the whole of `drbd100`, so its tail would be overwritten ([UG] "Internal meta data").
+- Doing it safely means taking the QM down and running an offline `resize2fs` shrink before `create-md`. That moves the filesystem under the QM in exactly the way this plan's fail-loud and no-re-format rules forbid.
+- RDQM has no such conversion either: the DR role is a `crtmqm` parameter.
+
+**Also rejected: "always build both resources, with the DR peer absent under `--no-dr`".** It does not match RDQM, whose `--no-dr` QM has no `.dr` resource. It would also leave a permanently unconnected `quorum majority` / `on-no-quorum io-error` member under the live filesystem, which is a needless I/O-error exposure. **(Judgment.)**
+
+**Judgment, flagged for review:** the blueprint captured only the HA/DR shape. The HA-only Pacemaker shape (the filesystem colocated with the HA Promoted role, mounted from the HA device) is derived by removing the DR layer from RDQM's chain. It is **not** observed.
+
+---
+
+### Task 5: Site-A HA formation (`pdrbd-qm`, HA-only shape) + the distributed workload
 
 **Files:**
 
 - Create: `ansible/roles/pdrbd-qm/defaults/main.yml`
-- Create: `ansible/roles/pdrbd-qm/templates/qm.res.j2`
+- Create: `ansible/roles/pdrbd-qm/templates/qm.res.j2` (the HA resource)
+- Create: `ansible/roles/pdrbd-qm/templates/global_common.conf.j2` (RDQM's global/common section)
 - Create: `ansible/roles/pdrbd-qm/tasks/main.yml`
 - Create: `ansible/roles/pdrbd-qm/handlers/main.yml`
 - Create: `ansible/templates/mq/inter-qm.mqsc.j2`, `ansible/templates/mq/authz.mqsc.j2` (moved from `ansible/roles/mq-pcmk-qmgr/templates/`)
@@ -963,23 +1019,55 @@ vrg-commit --type feat --scope topology --message "pcmk-drbd-ubuntu stack: nodes
 
 **Interfaces:**
 
-- Consumes: Task 3 `drbd9` (VG `drbdpool`), Task 4 stack/groups/hb IPs, `pcmk-cluster` (vars `pcmk_cluster_name`, `pcmk_site_nodes`), `mq-install`, `mq-authz-accounts`, `mq-diag-logging`, `mq-event-monitor`, `pki-distribute`, `site-distributed-shared.yml`; provision-phase extra-vars `qm_app`, `qm_svc`, `chl_to_svc`, `chl_to_app`, `svc_req_queue`.
-- Produces: per-QM resource `{{ qm_name | lower }}` (DRBD device `/dev/drbd{{ pdrbd_minor }}`, LV `drbdpool/{{ qm_name | lower }}`, mount `/var/mqm/vols/{{ qm_name | lower }}`); Pacemaker resources `drbd_qm` (promotable clone `drbd_qm-clone`) and group `mq_group` = `mq_fs` → `mq_vip` → `mq_qm`; role vars `pdrbd_site_group` (`pdrbd_a`/`pdrbd_b`) and `pdrbd_peers` (list of `{name, addr_hb, addr_wan, node_id, site}`) consumed again by Task 6.
+- **Consumes:**
+  - Task 3 `drbd9` (VG `drbdpool`) and Task 4's stack, groups and hb IPs.
+  - `pcmk-cluster` (vars `pcmk_cluster_name`, `pcmk_site_nodes`), `mq-install`, `mq-authz-accounts`, `mq-diag-logging`, `mq-event-monitor`, `pki-distribute` and `site-distributed-shared.yml`.
+  - The provision-phase extra-vars `qm_app`, `qm_svc`, `chl_to_svc`, `chl_to_app` and `svc_req_queue`.
+- **Produces:**
+  - Per QM, the **HA resource** `{{ qm_name | lower }}`: minor 100, port 7000, site-local, backed by LV `drbdpool/{{ qm_name | lower }}_00` and mounted at `/var/mqm/vols/{{ qm_name | lower }}` from `pdrbd_fs_device`.
+  - Pacemaker resources: promotable clone `drbd_qm-clone` (primitive `drbd_qm`) and group `mq_group` = `mq_fs` → `mq_vip` → `mq_qm`. The names are kept because Task 4's merged verbs (`pcs resource enable mq_group`) and `watcherboard._owner_resource` (`mq_qm`) use them.
+  - Role vars `pdrbd_site_group` (`pdrbd_a`/`pdrbd_b`), `pdrbd_site_peers` (this site's 3 nodes, `{name, addr_hb, addr_wan, node_id}`) and `pdrbd_dr` (false here). Task 6 consumes all three.
 
-**Blueprint inputs (Task 2 reconciles each):** `pdrbd_lv_size`, `pdrbd_fstype`, `pdrbd_mount_opts`, `pdrbd_port`, `pdrbd_minor`, the `.res` `options`/`net`/`disk` blocks (quorum, `on-no-quorum`, `after-sb-*`, `fencing`), cluster properties (`stonith-enabled`, `no-quorum-policy`), the DRBD agent (`ocf:linbit:drbd` hypothesis), constraint set, and the replication network (hb hypothesis).
+**Blueprint values (settled; these replace the pre-capture hypothesis):**
+
+| Item | Value | Source |
+|---|---|---|
+| VG / LV | `drbdpool` / `<qm>_00`, `3072M` | `rdqm-a1/vgs.txt`, `rdqm-a1/lvs.txt`, `rdqm-a1/pcmk-config.txt` (`rdqmapp-size=3072`) |
+| Filesystem / options / mount | `ext4` / defaults (`rw,relatime`; `seclabel` is SELinux) / `/var/mqm/vols/<qm>` | `rdqm-a1/mounts.txt` |
+| HA resource members | this site's 3 nodes only, `connection-mesh`, node-ids 0–2 at **each** site | `rdqm-a1/drbd-dump.txt`, `rdqm-b1/drbd-dump.txt` |
+| HA network / port / minor | `net-hb-<site>` / `7000` / `100` | `rdqm-a1/drbd-dump.txt`, `rdqm-a1/rdqm-ini.txt`, `rdqm-a1/pcmk-config.txt` (`rdqmapp-drbd-port`, `rdqmapp-drbd-minor`) |
+| HA protocol | C: not set, so the DRBD default applies. [opts] `protocol C`: "This is the default protocol." | `rdqm-a1/drbd-conf.txt` (`rdqmapp.res` has no `protocol`) |
+| HA `options` | `quorum 2; on-no-quorum io-error; auto-promote no;` | `rdqm-a1/drbd-conf.txt` |
+| HA `net` / `disk` | `verify-alg sha1; rr-conflict retry-connect;` / `disable-write-same yes;` | `rdqm-a1/drbd-conf.txt` |
+| Not set | `after-sb-*`, `fencing` (default `dont-care`, [conf]), handlers (IBM `rdqmhandler`, TL-3), `tls` (#1609) | `rdqm-a1/drbd-dump.txt`, RP-7, SC-1 |
+| Global / common | `usage-count no; udev-always-use-vnr;`. Options: `twopc-timeout 100`. Net: `ping-timeout 40; socket-check-timeout 5; max-buffers 40k;`. Disk: `c-fill-target 1M; c-max-rate 500M; c-min-rate 100M; resync-without-replication no;` | `rdqm-a1/drbd-conf.txt` (`global_common.conf`), RP-6, TL-5 |
+| Cluster properties | `stonith-enabled=false`; `no-quorum-policy` **not set** (default `stop`); `resource-stickiness=1` | `rdqm-a1/pcmk-config.txt`, CL-2, CL-3 |
+| HA clone | `ocf:linbit:drbd drbd_resource=<qm> adjust_master_score="0 10 10000 10000"`, promotable, `notify=true`, no `clone-max` (so 3) | `rdqm-a1/pcmk-config.txt`, CL-4 |
+| DRBD op timeouts | monitor 20 s Unpromoted / 10 s Promoted (each timeout 20); start 240; stop 100; promote 90; demote 90 | `rdqm-a1/pcmk-config.txt` |
+| Filesystem | `ocf:heartbeat:Filesystem` with `force_unmount=safe fast_stop=no`; ops start 60 / stop 60; **no monitor op** | `rdqm-a1/pcmk-config.txt`, CL-8 |
+| Floating IP | `ocf:heartbeat:IPaddr2 cidr_netmask=24`, monitor 30 s | `rdqm-a1/pcmk-config.txt`, CL-9 |
+| QM resource | **deviation:** `systemd:mq-<QM>` instead of `ocf:ibm:rdqm` (start 43200 s, stop 300 s, monitor 30 s / 60 s). `ocf:ibm:rdqmx` is not reproduced | `rdqm-a1/pcmk-config.txt`, `rdqm-a1/ocf-agents.txt`, CL-6, CL-7 |
+| Chain | RDQM uses fs → rdqmx → ip → QM, each `inf` colocated with and ordered after the previous one, plus `location <qm> 50: <preferred node>` | `rdqm-a1/pcmk-config.txt`, CL-10 |
+
+**Judgments in this table:**
+
+- **The group.** `mq_group` (`mq_fs` → `mq_vip` → `mq_qm`) is the same chain, because a group "is logically equivalent to" INFINITY colocations plus start orders between successive members ([PE], "Groups"). The location preference goes on `mq_group`, since [PE] says "it is usually preferable to reference the group itself". RDQM puts it on the QM, which pulls the chain with it.
+- **QM start timeout.** `mq_qm` copies RDQM's monitor (30 s / 60 s) and stop (300 s), but uses start `300` instead of `43200`. Twelve hours is the IBM agent's log-replay allowance, and on a `systemd` unit it would hide a hung `strmqm` (the fail-loud rule). The ledger records it under CL-6.
+- **Floating IP `nic`.** Not set. RDQM pins `nic=enp6s0`, and IPaddr2 can infer the NIC from the address's subnet. The ledger records it under CL-9 as `partial`.
 
 - [ ] **Step 1: Write the failing structure tests**
 
 ```python
 """pdrbd-qm role structure (epic .github#310 T5): destructive steps are guarded,
-no masked failures, and the SAN role is untouched."""
+no masked failures, the values are the RDQM blueprint's, and the SAN role is untouched."""
 
 import hashlib
 import pathlib
 
 import yaml
 
-TASKS = pathlib.Path("ansible/roles/pdrbd-qm/tasks/main.yml")
+ROLE = pathlib.Path("ansible/roles/pdrbd-qm")
+TASKS = ROLE / "tasks/main.yml"
 # sha256 of ansible/roles/mq-pcmk-qmgr/tasks/main.yml on develop at 84d9bda (2026-10-10):
 # the SAN arm's role must not change in this epic (spec D1/D7).
 _MQ_PCMK_QMGR_TASKS_SHA256 = "bbb113886fc261828f299262138891224c828036a982ec97c64b106e4967e59f"
@@ -1032,6 +1120,61 @@ def test_mq_pcmk_qmgr_templates_still_resolve():
 def test_mq_pcmk_qmgr_tasks_unchanged():
     data = pathlib.Path("ansible/roles/mq-pcmk-qmgr/tasks/main.yml").read_bytes()
     assert hashlib.sha256(data).hexdigest() == _MQ_PCMK_QMGR_TASKS_SHA256
+
+
+# --- blueprint values (lab docs/reference/rdqm-blueprint/, reconciled on #1427) ---
+
+
+def test_ha_res_is_rdqm_shaped():
+    """rdqm-a1/drbd-conf.txt rdqmapp.res: site-local mesh, quorum 2, io-error, no auto-promote."""
+    text = (ROLE / "templates/qm.res.j2").read_text()
+    for want in (
+        "quorum 2;", "on-no-quorum io-error;", "auto-promote no;", "connection-mesh",
+        "verify-alg sha1;", "rr-conflict retry-connect;", "disable-write-same yes;",
+        "meta-disk internal;", "pdrbd_site_peers",
+    ):
+        assert want in text, want
+    # Not set by RDQM: split-brain auto-recovery, DRBD fencing, the old six-peer WAN wiring.
+    for banned in ("after-sb-", "fencing", "suspend-io", "addr_wan", "protocol A"):
+        assert banned not in text, banned
+
+
+def test_global_common_is_rdqms():
+    """rdqm-a1/drbd-conf.txt global_common.conf (RDQM replaces the stock file)."""
+    text = (ROLE / "templates/global_common.conf.j2").read_text()
+    for want in (
+        "usage-count no;", "udev-always-use-vnr;", "twopc-timeout 100;", "ping-timeout 40;",
+        "socket-check-timeout 5;", "max-buffers 40k;", "c-fill-target 1M;", "c-max-rate 500M;",
+        "c-min-rate 100M;", "resync-without-replication no;",
+    ):
+        assert want in text, want
+
+
+def test_defaults_carry_blueprint_values():
+    d = yaml.safe_load((ROLE / "defaults/main.yml").read_text())
+    assert (d["pdrbd_ha_port"], d["pdrbd_ha_minor"]) == (7000, 100)
+    assert d["pdrbd_lv"] == "{{ pdrbd_res }}_00"
+    assert d["pdrbd_lv_size"] == "3072M"
+    assert d["pdrbd_stickiness"] == 1
+    assert d["pdrbd_dr"] is False
+
+
+def test_pacemaker_values_match_blueprint():
+    text = TASKS.read_text()
+    for want in (
+        'adjust_master_score="0 10 10000 10000"', "force_unmount=safe", "fast_stop=no",
+        "resource-stickiness={{ pdrbd_stickiness }}", "stonith-enabled=false",
+    ):
+        assert want in text, want
+    assert "no-quorum-policy" not in text  # RDQM leaves the default (stop): CL-2
+
+
+def test_mkfs_targets_the_mounted_device():
+    """One variable names the device mkfs formats AND Pacemaker mounts (stacked metadata
+    makes the DR device smaller than the HA device, so they must never diverge)."""
+    mkfs = _by_name("initial promote + mkfs")["ansible.builtin.shell"]
+    assert "{{ pdrbd_fs_device }}" in mkfs
+    assert "device={{ pdrbd_fs_device }}" in TASKS.read_text()
 ```
 
 If `develop` has moved and that file legitimately changed before this task starts (not in this epic), update the constant from `sha256sum ansible/roles/mq-pcmk-qmgr/tasks/main.yml` on the branch point and note the commit in the comment.
@@ -1053,78 +1196,119 @@ ln -s ../../../templates/mq/authz.mqsc.j2 ansible/roles/mq-pcmk-qmgr/templates/a
 
 Confirm `lab/boxes/_manifest-hash.sh` follows symlinks for the role closure it digests (`grep -n 'find\|readlink\|-L' lab/boxes/_manifest-hash.sh`); the `pcmk` box does not bake these templates, so its digest must not change — run `lab/boxes/_manifest-hash.sh` for the pcmk box before and after and confirm the same digest.
 
-- [ ] **Step 4: `ansible/roles/pdrbd-qm/defaults/main.yml` (hypothesis values; Task 2 reconciles)**
+- [ ] **Step 4: `ansible/roles/pdrbd-qm/defaults/main.yml` (blueprint values)**
 
 ```yaml
 ---
-# pdrbd-qm (epic .github#310): one RDQM-style replicated volume per QM. Every value below
-# is the PRE-CAPTURE HYPOTHESIS; the Blueprint reconciliation comment on this task's
-# issue (Task 2) is authoritative and its values replace these before this task starts.
-pdrbd_vg: drbdpool
-pdrbd_lv_size: 3G              # RDQM crtmqm -fs default (blueprint: lvs.txt)
-pdrbd_fstype: ext4             # blueprint: mounts.txt / lsblk.txt
-pdrbd_mount_opts: defaults     # blueprint: mounts.txt
-pdrbd_mount_root: /var/mqm/vols
-pdrbd_port: 7001               # RDQM: "next free port number above 7000" (IBM Docs)
-pdrbd_minor: 100               # blueprint: drbd-dump.txt (device minor)
-pdrbd_res: "{{ qm_name | lower }}"
+# pdrbd-qm (epic .github#310): one RDQM-shaped replicated volume per QM. Every value is the
+# RDQM blueprint's (lab docs/reference/rdqm-blueprint/; reconciled on #1427, adopted by the
+# owner 2026-10-17 under .github#362); each line names its source file.
+pdrbd_vg: drbdpool                    # rdqm-a1/vgs.txt
+pdrbd_res: "{{ qm_name | lower }}"    # HA resource = lower-case QM (rdqm-a1/drbd-dump.txt)
+pdrbd_lv: "{{ pdrbd_res }}_00"        # rdqm-a1/lvs.txt (rdqmapp_00)
+pdrbd_lv_size: 3072M                  # rdqm-a1/pcmk-config.txt rdqmapp-size=3072; lvs.txt 3.00g
+pdrbd_fstype: ext4                    # rdqm-a1/mounts.txt
+pdrbd_mount_opts: defaults            # rdqm-a1/mounts.txt (rw,relatime; seclabel is SELinux)
+pdrbd_mount_root: /var/mqm/vols       # rdqm-a1/mounts.txt
 pdrbd_mount: "{{ pdrbd_mount_root }}/{{ pdrbd_res }}"
-pdrbd_stonith_enabled: false   # blueprint: pcmk-config.txt (stonith-enabled)
-pdrbd_no_quorum_policy: stop   # blueprint: pcmk-config.txt
-# Site membership: set by the play (Tasks 5/6) from the inventory + topology hb IPs.
-#   pdrbd_peers: [{ name, addr_hb, addr_wan, node_id, site: a|b }]
+pdrbd_ha_port: 7000                   # rdqm-a1/pcmk-config.txt rdqmapp-drbd-port
+pdrbd_ha_minor: 100                   # rdqm-a1/pcmk-config.txt rdqmapp-drbd-minor
+pdrbd_stickiness: 1                   # rdqm-a1/pcmk-config.txt rsc_defaults
+pdrbd_preferred_score: 50             # rdqm-a1/pcmk-config.txt rdqmapp_preferred_location
+# Shape (see "The shape decision"): HA-only here. Task 6 adds the DR/HA shape, chosen from
+# dr_enabled when the QM is FIRST created and never changed on a formed QM.
+pdrbd_dr: false
+# The ONE device mkfs formats and Pacemaker mounts. HA-only: the HA device (by-res needs
+# udev-always-use-vnr, rendered in global_common.conf as RDQM does).
+pdrbd_fs_device: "/dev/drbd/by-res/{{ pdrbd_res }}/0"
+# Set by the play from the inventory + topology hb IPs:
 #   pdrbd_site_group: pdrbd_a | pdrbd_b
+#   pdrbd_site_peers: [{ name, addr_hb, addr_wan, node_id }]   # this site's 3 nodes only
 ```
 
-- [ ] **Step 5: `ansible/roles/pdrbd-qm/templates/qm.res.j2`**
+- [ ] **Step 5: The DRBD templates**
+
+`ansible/roles/pdrbd-qm/templates/global_common.conf.j2` — RDQM replaces the stock file (it keeps it as `global_common.conf.rdqmsave`; `rdqm-a1/drbd-conf.txt`, TL-5):
 
 ```jinja
-# {{ ansible_managed }} — RDQM-faithful per-QM DRBD 9 resource (epic .github#310).
-# options/net blocks are copied from the RDQM blueprint (docs/reference/rdqm-blueprint/
-# <host>/drbd-dump.txt). Connections: same-site pairs replicate synchronously (protocol C)
-# over that site's hb network; cross-site pairs (DR, only when DR is enabled) replicate
-# asynchronously (protocol A) over net-wan — the hb networks are per-site, not routed.
-resource {{ pdrbd_res }} {
-  options {
-    quorum majority;
-    on-no-quorum suspend-io;
-  }
-  net {
-    after-sb-0pri discard-zero-changes;
-    after-sb-1pri discard-secondary;
-    after-sb-2pri disconnect;
-  }
-  device minor {{ pdrbd_minor }};
-  disk /dev/{{ pdrbd_vg }}/{{ pdrbd_res }};
-  meta-disk internal;
-{% for p in pdrbd_peers %}
-  on {{ p.name }} {
-    node-id {{ p.node_id }};
-  }
-{% endfor %}
-{% for i in range(pdrbd_peers | length) %}{% for j in range(i + 1, pdrbd_peers | length) %}
-{% set a = pdrbd_peers[i] %}{% set b = pdrbd_peers[j] %}{% set local = a.site == b.site %}
-  connection {
-    host {{ a.name }} address {{ a.addr_hb if local else a.addr_wan }}:{{ pdrbd_port }};
-    host {{ b.name }} address {{ b.addr_hb if local else b.addr_wan }}:{{ pdrbd_port }};
-    net { protocol {{ 'C' if local else 'A' }}; }
-  }
-{% endfor %}{% endfor %}
+# {{ ansible_managed }} — RDQM's global/common section, value for value
+# (lab docs/reference/rdqm-blueprint/rdqm-a1/drbd-conf.txt, global_common.conf).
+# Units per drbdsetup-options.xml: twopc-timeout and ping-timeout are tenths of a second.
+global {
+    usage-count no;
+    udev-always-use-vnr;
+}
+
+common {
+    options {
+        twopc-timeout 100;
+    }
+    disk {
+        c-fill-target 1M;
+        c-max-rate 500M;
+        c-min-rate 100M;
+        resync-without-replication no;
+    }
+    net {
+        ping-timeout 40;
+        socket-check-timeout 5;
+        max-buffers 40k;
+    }
 }
 ```
 
-`pdrbd_peers` entries are `{name, addr_hb, addr_wan, node_id, site}`; with DR disabled (`--no-dr`) it holds only site A, so only the three protocol-C connections render.
+`ansible/roles/pdrbd-qm/templates/qm.res.j2` — the **HA resource**, laid out as RDQM's `rdqmapp.res` (`rdqm-a1/drbd-conf.txt`):
 
-**Known hazard the blueprint must settle before this task starts:** with one six-peer resource and `quorum majority`, cutting the WAN leaves each site with 3 of 6 peers — no majority — so `on-no-quorum suspend-io` would freeze the live site on a DR-link outage. RDQM does not behave that way, so it either scopes quorum differently (e.g. a fixed `quorum` count, or DR peers excluded from quorum) or uses separate HA and DR resources. Task 2's reconciliation records which, and this template's `options` block (or the resource split) is changed to match **before** implementation. Drill 3 and drill 6 then prove the chosen behaviour on both arms.
+```jinja
+# {{ ansible_managed }} — RDQM-shaped per-QM HA resource (epic .github#310).
+# SITE-LOCAL: only this site's three nodes, a connection-mesh over net-hb-<site>. The other
+# site is never a member, so a WAN cut cannot cost this site HA quorum (RP-1/RP-2).
+# Values: lab docs/reference/rdqm-blueprint/rdqm-a1/drbd-conf.txt (rdqmapp.res).
+# Deliberately NOT set, as in RDQM: protocol (default C), the split-brain policies (RP-7),
+# the fence policy (default dont-care), handlers (IBM rdqmhandler; TL-3), tls (lab #1609).
+resource {{ pdrbd_res }} {
+    options {
+        quorum 2;
+        on-no-quorum io-error;
+        auto-promote no;
+    }
+    net {
+        verify-alg sha1;
+        rr-conflict retry-connect;
+    }
+    disk {
+        disable-write-same yes;
+    }
+{% for p in pdrbd_site_peers %}
+    on {{ p.name }} {
+        node-id {{ p.node_id }};
+        address ipv4 {{ p.addr_hb }}:{{ pdrbd_ha_port }};
+        volume 0 {
+            device minor {{ pdrbd_ha_minor }};
+            disk /dev/{{ pdrbd_vg }}/{{ pdrbd_lv }};
+            meta-disk internal;
+        }
+    }
+{% endfor %}
+    connection-mesh {
+        hosts {{ pdrbd_site_peers | map(attribute='name') | join(' ') }};
+    }
+}
+```
+
+**Known hazard — settled.** The pre-capture design had one six-peer resource with `quorum majority`. A WAN cut would have left each site with 3 of 6 peers, and `on-no-quorum` would have frozen the live site. RDQM avoids this structurally. Its HA resource holds only the three nodes of one site, with a fixed `quorum 2` (`rdqm-a1/drbd-dump.txt`, `rdqm-b1/drbd-dump.txt`). Each site is its own three-node corosync cluster (expected votes 3, quorum 2: `rdqm-a1/quorum.txt`, `rdqm-b1/quorum.txt`). The other site reaches the QM's data only through the separate stacked DR resource (Task 6). A WAN cut therefore cannot touch HA quorum: **Data**, BP README §2.2.
+
+One question remains open, and it is a DR-resource question, not an HA one: whether the live primary keeps **DR** quorum on a WAN cut (`quorum majority` over 2 members). Task 8 Drill 3b settles it on both arms.
 
 - [ ] **Step 6: `ansible/roles/pdrbd-qm/tasks/main.yml`**
 
 ```yaml
 ---
-# pdrbd-qm (epic .github#310): the per-QM RDQM-style volume + Pacemaker group, on the
+# pdrbd-qm (epic .github#310): the per-QM RDQM-shaped volume + Pacemaker resources, on the
 # local site group (pdrbd_site_group). First-time formation is guarded by `pdrbd_formed`
-# (Pacemaker already owns drbd_qm) so a re-run never re-creates md, re-formats, or
-# re-creates the QM over live data.
+# (Pacemaker already owns drbd_qm at THIS site) so a re-run never re-creates md,
+# re-formats, or re-creates the QM over live data. "Once per site" is
+# `inventory_hostname == pdrbd_creator`, never run_once (Task 6 runs both sites in one play).
 
 - name: event monitoring + JSON diagnostic logging host prep (arm-neutral roles)
   ansible.builtin.include_role:
@@ -1133,34 +1317,68 @@ resource {{ pdrbd_res }} {
   vars:
     qmgr_name: "{{ qm_name }}"
 
-- name: probe — does Pacemaker already own this QM's DRBD resource?
+- name: this site's creation node
+  ansible.builtin.set_fact:
+    pdrbd_creator: "{{ groups[pdrbd_site_group][0] }}"
+
+- name: probe — does this site's Pacemaker already own the QM's HA DRBD resource?
   ansible.builtin.command: pcs resource status drbd_qm
   register: pdrbd_owned
   changed_when: false
   failed_when: pdrbd_owned.rc not in [0, 1]
-  run_once: true
   become: true
 
 - name: record formation state
   ansible.builtin.set_fact:
     pdrbd_formed: "{{ pdrbd_owned.rc == 0 }}"
 
-- name: per-QM logical volume in the drbdpool VG (lvs probe)
+- name: ocf:linbit:drbd on this node accepts the blueprint parameters
+  # RDQM's agent is drbd-pacemaker 9.33.1 (rdqm-a1/packages.txt); ours comes from the LINBIT
+  # PPA's drbd-utils. Prove the two parameters exist before any resource uses them.
   ansible.builtin.shell: |
-    set -e
-    if ! lvs {{ pdrbd_vg }}/{{ pdrbd_res }} >/dev/null 2>&1; then
-      lvcreate -y -L {{ pdrbd_lv_size }} -n {{ pdrbd_res }} {{ pdrbd_vg }}
-      echo LV-CREATED
-    fi
-  register: pdrbd_lv
-  changed_when: "'LV-CREATED' in pdrbd_lv.stdout"
+    set -o pipefail
+    crm_resource --show-metadata ocf:linbit:drbd | grep -c -E 'name="(adjust_master_score|wfc_timeout)"'
+  args:
+    executable: /bin/bash
+  register: pdrbd_agent_params
+  changed_when: false
+  failed_when: pdrbd_agent_params.rc != 0 or (pdrbd_agent_params.stdout | int) != 2
   become: true
 
-- name: DRBD resource definition (blueprint-derived)
+- name: per-QM logical volume <qm>_00 in the drbdpool VG (lvs probe)
+  ansible.builtin.shell: |
+    set -e
+    if ! lvs {{ pdrbd_vg }}/{{ pdrbd_lv }} >/dev/null 2>&1; then
+      lvcreate -y -L {{ pdrbd_lv_size }} -n {{ pdrbd_lv }} {{ pdrbd_vg }}
+      echo LV-CREATED
+    fi
+  register: pdrbd_lv_out
+  changed_when: "'LV-CREATED' in pdrbd_lv_out.stdout"
+  become: true
+
+- name: keep the stock global_common.conf once (RDQM keeps .rdqmsave; TL-5)
+  ansible.builtin.command: cp -n /etc/drbd.d/global_common.conf /etc/drbd.d/global_common.conf.pdrbdsave
+  args:
+    creates: /etc/drbd.d/global_common.conf.pdrbdsave
+  become: true
+
+- name: DRBD global/common section (RDQM's values)
+  ansible.builtin.template:
+    src: global_common.conf.j2
+    dest: /etc/drbd.d/global_common.conf
+    mode: "0644"
+  become: true
+
+- name: HA resource definition (site-local, RDQM's rdqmapp.res)
   ansible.builtin.template:
     src: qm.res.j2
     dest: "/etc/drbd.d/{{ pdrbd_res }}.res"
     mode: "0644"
+  become: true
+
+- name: the rendered DRBD config parses (an option this drbd-utils rejects fails here, loud)
+  ansible.builtin.command: drbdadm dump all
+  changed_when: false
   become: true
 
 - name: create-md (only when the resource is not up and has no metadata)
@@ -1204,30 +1422,35 @@ resource {{ pdrbd_res }} {
     or 'Unconfigured' in pdrbd_dstate.stdout
   become: true
 
-- name: first-time formation on the creation node
-  when: not pdrbd_formed
-  run_once: true
+- name: first-time formation on this site's creation node
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
   become: true
   block:
     - name: wait for the site peers to connect
+      # `drbdadm status` omits the connection field while a peer is Connected
+      # (rdqm-a1/drbd-status.txt shows only `rdqm-a2 role:Secondary`), so the pre-capture
+      # grep could never match; `drbdsetup status --verbose` prints it (confirm live, Step 11).
       ansible.builtin.shell: |
         set -o pipefail
         for i in $(seq 1 60); do
-          n=$(drbdadm status {{ pdrbd_res }} | grep -c 'connection:Connected' || [ $? -eq 1 ])
+          n=$(drbdsetup status --verbose {{ pdrbd_res }} | grep -c 'connection:Connected' || [ $? -eq 1 ])
           [ "$n" -ge 2 ] && { echo connected; exit 0; }
           sleep 2
         done
-        drbdadm status {{ pdrbd_res }}; exit 1
+        drbdsetup status --verbose {{ pdrbd_res }}; exit 1
       args:
         executable: /bin/bash
       changed_when: false
 
+    # auto-promote is `no` (blueprint), so every promotion is explicit.
     - name: initial promote + mkfs (fresh volume, skip the full initial sync)
       ansible.builtin.shell: |
         set -e
         drbdadm new-current-uuid --clear-bitmap {{ pdrbd_res }}/0
         drbdadm primary {{ pdrbd_res }}
-        mkfs.{{ pdrbd_fstype }} -q /dev/drbd{{ pdrbd_minor }}
+        mkfs.{{ pdrbd_fstype }} -q {{ pdrbd_fs_device }}
       changed_when: true
 
     # Shell, not ansible.posix.mount: the lab installs no galaxy collections (#156).
@@ -1235,7 +1458,7 @@ resource {{ pdrbd_res }} {
       ansible.builtin.shell: |
         set -e
         mkdir -p {{ pdrbd_mount }}
-        mountpoint -q {{ pdrbd_mount }} || mount -t {{ pdrbd_fstype }} -o {{ pdrbd_mount_opts }} /dev/drbd{{ pdrbd_minor }} {{ pdrbd_mount }}
+        mountpoint -q {{ pdrbd_mount }} || mount -t {{ pdrbd_fstype }} -o {{ pdrbd_mount_opts }} {{ pdrbd_fs_device }} {{ pdrbd_mount }}
         mkdir -p {{ pdrbd_mount }}/qmgr {{ pdrbd_mount }}/log
         chown -R mqm:mqm {{ pdrbd_mount }}
       changed_when: true
@@ -1246,6 +1469,8 @@ resource {{ pdrbd_res }} {
         -p 1414 {{ qm_name }}'
       changed_when: true
 ```
+
+The `--clear-bitmap` skip of the initial sync is the `drbd-operations.md` "real fix" (blank disks, all peers up). The QM path layout matches RDQM's `DataPath=/var/mqm/vols/rdqmapp/qmgr/rdqmapp` (`rdqm-a1/mqs-ini.txt`, ST-5).
 
 Continue the block (still first-time, creation node) with the arm-neutral configuration, mirroring `mq-pcmk-qmgr` tasks 1–3 but on `{{ pdrbd_mount }}`:
 
@@ -1315,11 +1540,12 @@ Then, on every node of the site group (outside the block):
 
 ```yaml
 - name: teach the QM definition to the other site nodes
+  # Every RDQM node carries the same addmqinf definition, site B included (rdqm-*/dspmqinf.txt).
   ansible.builtin.command:
-    cmd: "su mqm -c '{{ hostvars[groups[pdrbd_site_group][0]].pdrbd_addmqinf.stdout }}'"
+    cmd: "su mqm -c '{{ hostvars[groups['pdrbd_a'][0]].pdrbd_addmqinf.stdout }}'"
   when:
     - not pdrbd_formed
-    - inventory_hostname != groups[pdrbd_site_group][0]
+    - inventory_hostname != groups['pdrbd_a'][0]
   register: pdrbd_addmqinf_out
   failed_when: pdrbd_addmqinf_out.rc != 0 and 'already' not in (pdrbd_addmqinf_out.stderr | default(''))
   changed_when: pdrbd_addmqinf_out.rc == 0
@@ -1335,6 +1561,7 @@ Then, on every node of the site group (outside the block):
   become: true
 
 - name: queue-manager systemd unit (Pacemaker is the only starter)
+  # Deviation CL-6: RDQM runs the QM under the IBM agent ocf:ibm:rdqm (owner decision 5).
   ansible.builtin.copy:
     dest: "/etc/systemd/system/mq-{{ qm_name }}.service"
     mode: "0644"
@@ -1357,33 +1584,45 @@ Then, on every node of the site group (outside the block):
     daemon_reload: true
   become: true
 
-- name: cluster properties (blueprint-derived)
+- name: cluster properties (rdqm-a1/pcmk-config.txt; the quorum policy stays at its default, CL-2)
   ansible.builtin.shell: |
     set -e
-    pcs property set stonith-enabled={{ pdrbd_stonith_enabled | lower }}
-    pcs property set no-quorum-policy={{ pdrbd_no_quorum_policy }}
-    pcs resource defaults update resource-stickiness=1000
-  run_once: true
+    pcs property set stonith-enabled=false
+    pcs resource defaults update resource-stickiness={{ pdrbd_stickiness }}
+  when: inventory_hostname == pdrbd_creator
   changed_when: true
   become: true
 
-- name: Pacemaker resources (first-time only)
-  when: not pdrbd_formed
-  run_once: true
+- name: Pacemaker resources (first-time only; built in a CIB file and pushed atomically)
+  # Values: rdqm-a1/pcmk-config.txt. Chain: HA Promoted -> mq_group (fs -> vip -> qm).
+  # HA-only shape (Task 5). Judgment: derived by removing RDQM's DR layer; not captured.
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
   become: true
   ansible.builtin.shell: |
     set -e
-    pcs resource create drbd_qm ocf:linbit:drbd drbd_resource={{ pdrbd_res }} \
-      op monitor interval=15s role=Promoted op monitor interval=30s role=Unpromoted \
-      promotable promoted-max=1 promoted-node-max=1 clone-max=3 clone-node-max=1 notify=true
-    pcs resource create mq_fs ocf:heartbeat:Filesystem device=/dev/drbd{{ pdrbd_minor }} \
+    cib=$(mktemp); trap 'rm -f "$cib"' EXIT
+    pcs cluster cib "$cib"
+    pcs -f "$cib" resource create drbd_qm ocf:linbit:drbd drbd_resource={{ pdrbd_res }} \
+      adjust_master_score="0 10 10000 10000" \
+      op monitor interval=20s timeout=20s role=Unpromoted \
+      op monitor interval=10s timeout=20s role=Promoted \
+      op start timeout=240s op stop timeout=100s op promote timeout=90s op demote timeout=90s \
+      promotable notify=true
+    pcs -f "$cib" resource create mq_fs ocf:heartbeat:Filesystem device={{ pdrbd_fs_device }} \
       directory={{ pdrbd_mount }} fstype={{ pdrbd_fstype }} options={{ pdrbd_mount_opts }} \
-      op monitor interval=20s timeout=40s OCF_CHECK_LEVEL=20 group mq_group
-    pcs resource create mq_vip ocf:heartbeat:IPaddr2 ip={{ qm_vip }} cidr_netmask=24 \
-      group mq_group after mq_fs
-    pcs resource create mq_qm systemd:mq-{{ qm_name }} group mq_group after mq_vip
-    pcs constraint colocation add mq_group with Promoted drbd_qm-clone INFINITY
-    pcs constraint order promote drbd_qm-clone then start mq_group
+      force_unmount=safe fast_stop=no \
+      op start timeout=60s op stop timeout=60s --no-default-ops --group mq_group
+    pcs -f "$cib" resource create mq_vip ocf:heartbeat:IPaddr2 ip={{ qm_vip }} cidr_netmask=24 \
+      op monitor interval=30s --group mq_group --after mq_fs
+    pcs -f "$cib" resource create mq_qm systemd:mq-{{ qm_name }} \
+      op monitor interval=30s timeout=60s op start timeout=300s op stop timeout=300s \
+      --group mq_group --after mq_vip
+    pcs -f "$cib" constraint colocation add mq_group with Promoted drbd_qm-clone INFINITY
+    pcs -f "$cib" constraint order promote drbd_qm-clone then start mq_group
+    pcs -f "$cib" constraint location mq_group prefers {{ pdrbd_creator }}={{ pdrbd_preferred_score }}
+    pcs cluster cib-push "$cib" --config
   changed_when: true
 
 - name: wait for the QM to run under Pacemaker
@@ -1396,7 +1635,7 @@ Then, on every node of the site group (outside the block):
     pcs status resources; exit 1
   args:
     executable: /bin/bash
-  run_once: true
+  when: inventory_hostname == pdrbd_creator
   changed_when: false
   become: true
 ```
@@ -1411,14 +1650,18 @@ Then, on every node of the site group (outside the block):
   become: true
 ```
 
-If `pcs` on Ubuntu 24.04 (0.11.7) rejects the `group`/`after` keyword forms, use `--group`/`--after` (still accepted through 0.12.x, per the comment in `mq-pcmk-qmgr/tasks/main.yml`).
+**Notes on `pcs`:**
+
+- **Syntax.** `pcs` 0.11 on Ubuntu 24.04 takes `--group` / `--after` and `--no-default-ops`. Confirm both, and how the clone meta (`notify=true`) lands, with `pcs resource create --help` and `pcs resource config` on the first live run. `--no-default-ops` keeps `pcs` from adding a Filesystem monitor that RDQM does not have.
+- **Role names.** RDQM's `crm` output uses the legacy `Master`/`Slave` role names (BP README §0). `pcs` 0.11 spells them `Promoted`/`Unpromoted`; the two pairs are the same roles.
 
 - [ ] **Step 7: `ansible/_pdrbd-cluster-ha.yml` (site A building block)**
 
 ```yaml
 ---
 # Site A of the pcmk-drbd-ubuntu stack (epic .github#310): DRBD 9 + VG, MQ, the site's
-# 3-node Pacemaker cluster, then the per-QM replicated volume and resource group.
+# 3-node Pacemaker cluster. Like RDQM, every site is its OWN cluster; none spans the sites
+# (rdqm-*/corosync-conf.txt, rdqm-*/quorum.txt; CL-1).
 - name: wait for site A to be SSH-ready (cold-boot guard)
   hosts: pdrbd_a
   gather_facts: false
@@ -1454,23 +1697,34 @@ If `pcs` on Ubuntu 24.04 (0.11.7) rejects the `group`/`after` keyword forms, use
   roles: [pcmk-cluster]
 ```
 
-If the blueprint shows fencing is enabled, add a `pcmk-stonith` play here with the same `fence_hypervisor_*` vars `_pcmk-cluster-ha.yml` uses, and set `pdrbd_stonith_enabled: true`.
+RDQM uses no fencing at either the Pacemaker or the DRBD level (`stonith-enabled=false`, no fencing devices, no DRBD `fencing`/`fence-peer`: `rdqm-a1/pcmk-config.txt`, `rdqm-a1/drbd-dump.txt`). So no `pcmk-stonith` play is added.
 
 - [ ] **Step 8: `ansible/site-pdrbd.yml`**
 
 ```yaml
 ---
-# One full-HADR provision for pcmk-drbd-ubuntu (epic .github#310), composed like
-# site-pcmk.yml: 1) site A HA, 2) site B DR receiver (Task 6), 3) authz accounts,
-# 4) the per-QM volume + group, 5) the distributed workload (qm e2e needs it).
+# One provision for pcmk-drbd-ubuntu (epic .github#310), composed like site-pcmk.yml:
+# 1) site A HA, 2) authz accounts, 3) the per-QM volume + resources, 4) the distributed
+# workload (qm e2e needs it). Task 6 adds site B and the DR/HA shape.
+- name: preflight — the DR/HA shape is not built yet
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: refuse a DR provision until Task 6 (lab #1428) lands
+      ansible.builtin.assert:
+        that: not (dr_enabled | default(true) | bool)
+        fail_msg: >-
+          pcmk-drbd-ubuntu builds only the HA-only shape until Task 6 (#1428) lands; run
+          `mqlab bootstrap pcmk-drbd-ubuntu --no-dr`
+
 - import_playbook: _pdrbd-cluster-ha.yml
 
-- name: authz service accounts on every app-QM node (HA + DR)
-  hosts: "pdrbd_a{{ ':pdrbd_b' if (dr_enabled | default(true) | bool) else '' }}"
+- name: authz service accounts on every app-QM node
+  hosts: pdrbd_a
   become: true
   roles: [mq-authz-accounts]
 
-- name: per-QM replicated volume + resource group (site A)
+- name: per-QM replicated volume + resources (site A)
   hosts: pdrbd_a
   become: true
   vars:
@@ -1478,11 +1732,12 @@ If the blueprint shows fencing is enabled, add a `pcmk-stonith` play here with t
     qm_vip: 10.10.1.170
     svc_conn: "svc-sim-ext.service.com"
     pdrbd_site_group: pdrbd_a
-    # Site-A peers only in this task; Task 6 widens this to both sites when DR is enabled.
-    pdrbd_peers:
-      - { name: pdrbd-a1, addr_hb: 172.16.1.71, addr_wan: 10.99.0.71, node_id: 0, site: a }
-      - { name: pdrbd-a2, addr_hb: 172.16.1.72, addr_wan: 10.99.0.72, node_id: 1, site: a }
-      - { name: pdrbd-a3, addr_hb: 172.16.1.73, addr_wan: 10.99.0.73, node_id: 2, site: a }
+    # Site-local HA peers, node-ids 0-2 (RDQM numbers each site 0-2: rdqm-a1/drbd-dump.txt,
+    # rdqm-b1/drbd-dump.txt). addr_wan is unused by the HA template; Task 6's DR template uses it.
+    pdrbd_site_peers:
+      - { name: pdrbd-a1, addr_hb: 172.16.1.71, addr_wan: 10.99.0.71, node_id: 0 }
+      - { name: pdrbd-a2, addr_hb: 172.16.1.72, addr_wan: 10.99.0.72, node_id: 1 }
+      - { name: pdrbd-a3, addr_hb: 172.16.1.73, addr_wan: 10.99.0.73, node_id: 2 }
   roles: [pdrbd-qm]
 
 - import_playbook: site-distributed-shared.yml
@@ -1494,14 +1749,14 @@ If the blueprint shows fencing is enabled, add a `pcmk-stonith` play here with t
     app_conn: "pdrbd-vip-a.client.com(1414)"
 ```
 
-Read `ansible/site-rdqm.yml:429-445` and copy any further vars its `site-distributed-shared.yml` import passes (e.g. `app_tls`, `svc_partner_*`), substituting the `pdrbd-*` names. Confirm the node `-ext` DNS names exist (`mqlab dns` / `tests/test_dns.py` pattern: `<host>-ext.client.com` for hosts with `net-ext`).
+The preflight play is temporary: Task 6 deletes it. Read `ansible/site-rdqm.yml:429-445` and copy any further vars its `site-distributed-shared.yml` import passes (e.g. `app_tls`, `svc_partner_*`), substituting the `pdrbd-*` names. Confirm the node `-ext` DNS names exist (`mqlab dns` / `tests/test_dns.py` pattern: `<host>-ext.client.com` for hosts with `net-ext`).
 
 - [ ] **Step 9: `ansible/site-pdrbd-qm-down.yml` (`qm-destroy`)**
 
 ```yaml
 ---
-# qm-destroy for pcmk-drbd-ubuntu: remove the group + DRBD clone, take the resource down,
-# wipe its metadata, remove the LV and the QM definition on every site-A node.
+# qm-destroy for pcmk-drbd-ubuntu: remove the Pacemaker resources, take the DRBD resource
+# down, wipe its metadata, remove the <qm>_00 LV and the QM definition on every node.
 - name: remove the Pacemaker resources
   hosts: pdrbd_a
   become: true
@@ -1520,6 +1775,7 @@ Read `ansible/site-rdqm.yml:429-445` and copy any further vars its `site-distrib
   become: true
   vars:
     pdrbd_res: "{{ qm_name | lower }}"
+    pdrbd_lv: "{{ qm_name | lower }}_00"
   tasks:
     - name: drbd down + wipe-md + lvremove + resource file
       ansible.builtin.shell: |
@@ -1529,7 +1785,7 @@ Read `ansible/site-rdqm.yml:429-445` and copy any further vars its `site-distrib
           timeout 60 drbdadm wipe-md --force {{ pdrbd_res }} </dev/null
           rm -f /etc/drbd.d/{{ pdrbd_res }}.res
         fi
-        if lvs drbdpool/{{ pdrbd_res }} >/dev/null 2>&1; then lvremove -y drbdpool/{{ pdrbd_res }}; fi
+        if lvs drbdpool/{{ pdrbd_lv }} >/dev/null 2>&1; then lvremove -y drbdpool/{{ pdrbd_lv }}; fi
       changed_when: true
 
     - name: remove the QM definition (rmvmqinf; absent is fine)
@@ -1543,7 +1799,7 @@ Read `ansible/site-rdqm.yml:429-445` and copy any further vars its `site-distrib
 
 - [ ] **Step 10: Run tests; validate**
 
-Run: `uv run pytest tests/test_pdrbd_qm_role.py -v` — expected: PASS (6).
+Run: `uv run pytest tests/test_pdrbd_qm_role.py -v` — expected: PASS (11).
 Run: `vrg-container-run -- vrg-validate` — expected: green.
 
 - [ ] **Step 11: Operator brings up site A HA-only (human step)**
@@ -1554,17 +1810,34 @@ mqlab qm status pcmk-drbd-ubuntu
 mqlab qm e2e pcmk-drbd-ubuntu
 ```
 
-Expected: `qm status` shows `drbd_qm-clone` Promoted on one node, Unpromoted on two, `mq_group` Started on the promoted node, and `drbdadm status` shows the resource UpToDate with two Connected peers; `qm e2e` round-trips every request. Run `mqlab bootstrap pcmk-drbd-ubuntu --no-dr` a **second** time: expected `changed` only on probes/adjust, no create-md, mkfs or crtmqm (Review Focus 3). Paste both outputs into the issue.
+**Expected:**
+
+- `qm status` shows `drbd_qm-clone` Promoted on one node and Unpromoted on two, with `mq_group` Started on the promoted node.
+- `drbdadm status` shows the resource UpToDate, with two Connected peers.
+- `qm e2e` round-trips every request.
+- `findmnt /var/mqm/vols/pdrbdapp` on the promoted node shows source `/dev/drbd100`.
+- `lvs` shows `drbdpool/pdrbdapp_00`.
+
+Run `mqlab bootstrap pcmk-drbd-ubuntu --no-dr` a **second** time. Expected: `changed` only on probes and adjust, with no create-md, mkfs or crtmqm (Review Focus 3). Also run `pcs config` once and record the actual `crm_mon -1 -r` "Promoted:" line format for Task 6's parse. Paste the outputs into the issue.
 
 - [ ] **Step 12: Ledger update + commit**
 
-Update `docs/reference/rdqm-vs-vanilla-deviations.md`: set Status for every ST/RP/CL row now built (from `pending` to `exact`/`partial`/`none` with the consequence).
+Update `docs/reference/rdqm-vs-vanilla-deviations.md`. Set Status for every ST/RP/CL row that is now built, from `pending` to `exact`/`partial`/`none` with the consequence:
+
+- ST-2: now `exact` (`<qm>_00`).
+- RP-2, RP-4, RP-6 and RP-7: as built.
+- CL-2, CL-3, CL-4 and CL-8: as built.
+- CL-6: `partial`. Name the start-timeout and agent deviation.
+- CL-7: `none` (`rdqmx`).
+- CL-9: `partial`. No `nic`.
+- CL-10: the HA-only chain. The DR half follows in Task 6.
+- ST-4 and RP-1 stay `pending` until Task 6.
 
 ```bash
 vrg-git add ansible/roles/pdrbd-qm ansible/templates/mq ansible/roles/mq-pcmk-qmgr/templates \
   ansible/_pdrbd-cluster-ha.yml ansible/site-pdrbd.yml ansible/site-pdrbd-qm-down.yml \
   tests/test_pdrbd_qm_role.py docs/reference/rdqm-vs-vanilla-deviations.md
-vrg-commit --type feat --scope pdrbd --message "site-A HA: RDQM-style per-QM DRBD 9 volume under Pacemaker + distributed workload (#<T5>)"
+vrg-commit --type feat --scope pdrbd --message "site-A HA: RDQM-shaped per-QM DRBD 9 volume under Pacemaker + distributed workload (#1427)"
 ```
 
 ---
@@ -1786,29 +2059,73 @@ vrg-commit --type feat --scope dr --message "mqlab dr dispatches on each stack's
 
 ---
 
-### Task 6: DR — site B joins; operator-driven cutover/failback playbook
+### Task 6: DR — site B as its own HA cluster; the stacked DR resource; operator-driven DR demote/promote
 
 **Files:**
 
-- Create: `ansible/_pdrbd-dr-replication.yml`
+- Create: `ansible/_pdrbd-dr-replication.yml` (site B building block)
+- Create: `ansible/roles/pdrbd-qm/templates/qm.dr.res.j2` (the stacked DR resource)
 - Create: `ansible/site-pdrbd-dr-switch.yml`
 - Create: `ansible/tasks/rpo0-drill-seed.yml`, `ansible/tasks/rpo0-drill-verify.yml`
 - Create: `ansible/vars/pdrbd-peers.yml`
-- Modify: `ansible/site-pdrbd.yml` (import site B; both sites load the peer list)
-- Modify: `ansible/roles/pdrbd-qm/tasks/main.yml` (`pdrbd_dr_secondary` path)
+- Modify: `ansible/site-pdrbd.yml` (delete Task 5's preflight play; site B; one `pdrbd-qm` play over both sites)
+- Modify: `ansible/roles/pdrbd-qm/defaults/main.yml`, `ansible/roles/pdrbd-qm/tasks/main.yml` (the DR/HA shape)
+- Modify: `ansible/site-pdrbd-qm-down.yml` (DR resource, both sites)
+- Modify: `lab/topology.yaml` (`pcmk-drbd-ubuntu` `qm-status` verb)
 - Test: `tests/test_pdrbd_dr_switch.py`, `tests/test_pdrbd_qm_role.py`, `tests/test_topology_pdrbd.py`
 
 **Interfaces:**
 
-- Consumes: Task 5 role `pdrbd-qm` and its vars (`pdrbd_peers`, `pdrbd_site_group`, resource `drbd_qm`, group `mq_group`); Task 6a extra-vars `dr_direction`, `qm_name`, `rpo0_drill`.
-- Produces: `site-pdrbd-dr-switch.yml` honoring `dr_direction` (`a2b`|`b2a`), `rpo0_drill` (bool), and `dr_force` (bool, default false — forced DR only); the shared RPO-0 task files (inputs `rpo0_node`, `qm_name`; seed sets fact `rpo0_token`).
+- **Consumes:** Task 5's role `pdrbd-qm` and its vars (`pdrbd_site_group`, `pdrbd_site_peers`, `pdrbd_dr`, `pdrbd_fs_device`, the resource `drbd_qm` and the group `mq_group`), and Task 6a's extra-vars `dr_direction`, `qm_name` and `rpo0_drill`.
+- **Produces:**
+  - Per QM, the **DR resource** `{{ qm_name | lower }}.dr`. It is stacked on the HA resource, uses minor 7001 and port 7001, and has 2 members: the local site's HA primary, and the other site as one logical peer.
+  - Pacemaker: a promotable clone `drbd_dr_qm-clone` (primitive `drbd_dr_qm`) at each site. Its `target-role` is the DR role marker: `Promoted` at the DR primary site and `Unpromoted` at the secondary. A CIB property `pdrbd: <qm>-dr-role` (`1`/`2`) mirrors RDQM's `rdqm: <qm>-dr-role`.
+  - `site-pdrbd-dr-switch.yml`, honoring `dr_direction` (`a2b`|`b2a`), `rpo0_drill` (bool) and `dr_force` (bool, default false; forced DR only).
+  - The shared RPO-0 task files: inputs `rpo0_node` and `qm_name`; the seed sets fact `rpo0_token`.
 
-**Blueprint inputs:** whether site B's Pacemaker cluster holds the resources while secondary (hypothesis: defined, `target-role=Stopped`), the DRBD role/connection state of site B while secondary, and the cross-site connection protocol (hypothesis A).
+**Blueprint values (settled):**
+
+| Item | Value | Source |
+|---|---|---|
+| Site B | its own 3-node cluster (`corosync_votequorum`, expected 3, quorum 2) and its own HA resource `<qm>` (node-ids 0–2, `net-hb-b`, port 7000, minor 100) | `rdqm-b1/quorum.txt`, `rdqm-b1/corosync-conf.txt`, `rdqm-b1/drbd-dump.txt` |
+| DR resource | `<qm>.dr`, `stacked-on-top-of <qm>`, with no `disk` line: its backing device is the HA device `/dev/drbd100` | `rdqm-a1/drbd-conf.txt` (`rdqmapp.dr.res`); BP README §2.1 (supplementary probe `drbdsetup show`) |
+| DR members | 2. `stacked-on-top-of` gets node-id 0 at site A and 1 at site B. The remote is **one logical node** (node-id 1 at A, 0 at B) with `volume 0 { disk _remote; }` | `rdqm-a1/drbd-dump.txt`, `rdqm-b1/drbd-dump.txt` |
+| DR paths | 3 `path`s in one `connection`, from **this node's** WAN address to each remote-site WAN address. The file is rendered **per node**: on a2 the local `host` is `rdqm-a2 10.99.0.32` | `rdqm-a1/drbd-conf.txt`, `rdqm-a2/drbd-dump.txt`, `rdqm-a3/drbd-dump.txt` |
+| DR port / minor / net | `7001` / `7001` / `net-wan` | `rdqm-a1/pcmk-config.txt` (`rdqmapp-dr-port`, `rdqmapp-dr-local-ip`, `rdqmapp-dr-remote-ip`), `rdqm-a1/drbd-dump.txt` |
+| DR `net` | `protocol A; verify-alg sha1; allow-remote-read no;` (`tls yes` waits for #1609) | `rdqm-a1/drbd-conf.txt` |
+| DR `options` | `quorum majority; on-no-quorum io-error; auto-promote no;` | `rdqm-a1/drbd-conf.txt` |
+| DR clone | `ocf:linbit:drbd drbd_resource=<qm>.dr wfc_timeout=false`, promotable, `notify=true`, **`clone-max=1`**, with the same op timeouts as HA | `rdqm-a1/pcmk-config.txt`, CL-5 |
+| DR role marker | DR clone `target-role=Promoted` at site A and `Unpromoted` at site B; `rdqmapp-dr-role` is `1` at A and `2` at B | `rdqm-a1/pcmk-config.txt`, `rdqm-b1/pcmk-config.txt`, DR-1, DR-2 |
+| Chain | HA promote → DR start (DR colocated with HA Master); DR start and DR promote → fs (fs colocated with DR Master); fs → [rdqmx] → ip → QM, all `inf` | `rdqm-a1/pcmk-config.txt` |
+| Site B while secondary | HA clone **Promoted** on b1 (b2 and b3 Unpromoted); DR clone running **Unpromoted** on b1; fs, IP and QM **Stopped** | `rdqm-b1/pcmk-status.txt`, `rdqm-b1/drbd-status.txt`, DR-1 |
+| Mount | `/dev/drbd/by-res/<qm>.dr/0` (`drbd7001`) | `rdqm-a1/pcmk-config.txt`, `rdqm-a1/lsblk.txt`, ST-4 |
+| Status tooling | `drbdadm status all` does **not** list the stacked resource; `drbdsetup status --verbose` does | BP README §2.1 |
+| Snapshot LV | not built (owner decision 2); no `before-resync-*` handlers | DR-3 |
+
+**DRBD 9 stacking facts this task relies on (Data, upstream):**
+
+- `stacked-on-top-of` is "Used instead of an on section for configuring a stacked resource" ([conf]).
+- "The stacked device is the active one". The lower device "must be in the Primary role" for the stacked device to run. The stacked device's metadata is internal, which makes it slightly smaller ([UG] "Device stacking considerations").
+- Stacked operations take `drbdadm --stacked` (`-S`). The documented sequence is: bring up and promote the lower resource, then `create-md --stacked`, `up --stacked` and `primary --stacked` ([UG] "Creating a stacked 3-node setup").
+- `ocf:linbit:drbd` detects a stacked resource itself. It falls back to `drbdadm --stacked sh-dev` and then runs every later call as `drbdadm -S` ([ocf] `_drbd_validate_all`).
+- The agent's `stop` runs `drbdadm down` ([ocf] `drbd_stop`), so Pacemaker owns the stacked resource's up/down once the clone exists.
+- `wfc_timeout`: "Unless set to the empty string or any non-digits, wait (at most) this many seconds for the connection(s)". So `false` means no wait ([ocf]). Its default is `5`. `adjust_master_score` defaults to `"0 10 1000 10000"`; RDQM raises the third value to `10000` ([ocf]; `rdqm-a1/pcmk-config.txt`).
+- Stacking "is deprecated in DRBD version 9.x" ([UG], [conf]). **Judgment:** RDQM 10.0.1 ships it on DRBD 9.3.3, and this arm copies RDQM. The deprecation is recorded in the ledger (RP-1 consequence), not designed around.
+
+**DR quorum (open; Task 8 Drill 3b settles it):**
+
+- **Data.** `quorum majority` "requires … a majority partition of DRBD nodes". "If all missing nodes are marked as outdated, a partition always has quorum" ([opts], [UG] "Configuring quorum"). When a peer is lost ungracefully, DRBD "has to be assumed that it forms a partition with all the missing outdated nodes" ([opts]). On RDQM, each DR member reported `quorum( no -> yes )` alone at attach (BP README §2.2, supplementary probe).
+- **Judgment.** None of these sources says whether the live DR primary of a **2-member** resource keeps quorum when the WAN drops ungracefully against an UpToDate peer. If it does not, `on-no-quorum io-error` errors the live QM's filesystem on a WAN outage.
+  - RDQM may rely on its `disconnected` handler (`/opt/mqm/bin/rdqmhandler`, TL-3), which this arm does not reproduce.
+  - The plan copies the blueprint values (owner decision 3) and **tests** the behaviour (Step 7's early check, then Task 8 Drill 3b). It does not invent a mitigation.
 
 - [ ] **Step 1: Write the failing structure tests**
 
+`tests/test_pdrbd_dr_switch.py`:
+
 ```python
-"""site-pdrbd-dr-switch.yml structure (epic .github#310 T6)."""
+"""site-pdrbd-dr-switch.yml structure (epic .github#310 T6): RDQM-style DR demote/promote
+of the DR clone only; the HA layer at both sites is never touched."""
 
 import pathlib
 
@@ -1830,6 +2147,10 @@ def _index(fragment: str) -> int:
     return next(i for i, (_, t) in enumerate(_all_tasks()) if fragment in t["name"])
 
 
+def _task(fragment: str) -> dict:
+    return _all_tasks()[_index(fragment)][1]
+
+
 def test_dr_switch_validates_direction():
     assert _index("assert dr_direction") == 0
 
@@ -1839,7 +2160,7 @@ def test_dr_switch_asserts_disk_state_before_promote():
 
 
 def test_dr_switch_force_is_explicit():
-    gate = next(t for _, t in _all_tasks() if "assert the target's disk is UpToDate" in t["name"])
+    gate = _task("assert the target's disk is UpToDate")
     assert "dr_force" in str(gate["ansible.builtin.assert"]["that"])
 
 
@@ -1852,11 +2173,91 @@ def test_dr_switch_rpo0_seed_before_demote_and_verify_after_promote():
 def test_dr_switch_never_masks_a_failure():
     text = PB.read_text()
     assert "|| true" not in text and "failed_when: false" not in text
+
+
+def test_dr_switch_flips_only_the_dr_clone():
+    """RDQM's switch leaves each site's HA clone running (rdqm-b1/pcmk-status.txt: HA
+    Promoted on b1 under the DR secondary); only the DR clone's target-role moves."""
+    demote = _task("stop and demote at the source site")["ansible.builtin.shell"]
+    promote = _task("promote at the target site")["ansible.builtin.shell"]
+    assert "drbd_dr_qm-clone target-role=Unpromoted" in demote
+    assert "drbd_dr_qm-clone target-role=Promoted" in promote
+    assert "drbd_qm-clone" not in PB.read_text().replace("drbd_dr_qm-clone", "")
+
+
+def test_dr_switch_demotes_source_before_promoting_target():
+    """rdqmdr -p "fails if the primary instance of the queue manager is still running and
+    the DR replication link is still functioning" (IBM, rdqmdr, 10.0.x)."""
+    assert _index("assert the source DR resource is Secondary") < _index("promote at the target site")
 ```
+
+Append to `tests/test_pdrbd_qm_role.py`:
+
+```python
+def test_dr_res_is_rdqm_shaped():
+    """rdqm-a1/drbd-conf.txt rdqmapp.dr.res: stacked, 2 members, 3 paths, protocol A."""
+    text = (ROLE / "templates/qm.dr.res.j2").read_text()
+    for want in (
+        "stacked-on-top-of {{ pdrbd_res }}", "quorum majority;", "on-no-quorum io-error;",
+        "auto-promote no;", "protocol A;", "verify-alg sha1;", "allow-remote-read no;",
+        "disk _remote;", "path {", "pdrbd_remote_peers", "inventory_hostname",
+    ):
+        assert want in text, want
+    for banned in ("after-sb-", "fencing", "meta-disk", "connection-mesh"):
+        assert banned not in text, banned
+
+
+def test_dr_clone_matches_blueprint():
+    text = TASKS.read_text()
+    for want in (
+        "drbd_resource={{ pdrbd_dr_res }} wfc_timeout=false",
+        "clone-max=1",
+        "constraint colocation add drbd_dr_qm-clone with Promoted drbd_qm-clone INFINITY",
+        "constraint order promote drbd_qm-clone then start drbd_dr_qm-clone",
+        "constraint colocation add mq_group with Promoted drbd_dr_qm-clone INFINITY",
+        "constraint order promote drbd_dr_qm-clone then start mq_group",
+    ):
+        assert want in text, want
+
+
+def test_dr_shape_is_fixed_at_creation():
+    """The DR role is a creation-time property (RDQM: crtmqm -rr); a formed QM never
+    changes shape under live data — the stacked metadata would overwrite the fs tail."""
+    guard = _by_name("the DR shape of a formed QM never changes")
+    assert "pdrbd_dr_formed" in str(guard["ansible.builtin.assert"]["that"])
+    assert "qm-destroy" in guard["ansible.builtin.assert"]["fail_msg"]
+
+
+def test_dr_secondary_never_runs_first_time_formation():
+    """Site B forms its OWN HA resource (RDQM: HA Promoted on b1) but never mkfs/crtmqm."""
+    for frag in ("initial promote + mkfs", "create the queue manager"):
+        task, inherited = next((t, w) for t, w in _tasks() if frag in t["name"])
+        assert "groups['pdrbd_a'][0]" in inherited + str(task.get("when", "")), frag
+```
+
+**Updated tests, whose premises changed:**
+
+- `test_pdrbd_qm_destructive_steps_are_guarded` (**Review Focus 3**, name kept). Its fragment tuple gains the DR steps:
+
+  ```python
+      for frag in ("create-md", "stacked create-md", "HA initial promote",
+                   "initial promote + mkfs", "create the queue manager"):
+  ```
+
+  The content changed because the stacked resource adds a second metadata create and a second initial promote. Both are destructive on re-run, so both must sit behind `pdrbd_formed`.
+- `test_defaults_carry_blueprint_values`. Replace `assert d["pdrbd_dr"] is False` with:
+
+  ```python
+      assert "dr_enabled" in d["pdrbd_dr"]
+      assert (d["pdrbd_dr_port"], d["pdrbd_dr_minor"]) == (7001, 7001)
+  ```
+
+- `test_dr_secondary_never_runs_first_time_formation` (name kept from the pre-capture plan). The old premise was that site B skips formation entirely. Under the two-resource design, site B forms its own HA resource and only skips the QM creation. The test now checks that.
+- `tests/test_topology_pdrbd.py::test_pdrbd_verbs`. Change `assert "drbdadm status" in v["qm-status"]["cmd"]` to `assert "drbdsetup status --verbose" in v["qm-status"]["cmd"]`, because `drbdadm status all` omits the stacked resource (BP README §2.1).
 
 - [ ] **Step 2: Run to verify they fail**
 
-Run: `uv run pytest tests/test_pdrbd_dr_switch.py -v` — expected: FAIL (file missing).
+Run: `uv run pytest tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py tests/test_topology_pdrbd.py -v` — expected: FAIL (switch playbook and DR template missing; role lacks the DR shape; verb unchanged).
 
 - [ ] **Step 3: Shared RPO-0 task files (mirroring `lab/scripts/rdqm-dr-cutover.sh` `rpo0_seed`/verify)**
 
@@ -1908,14 +2309,15 @@ Run: `uv run pytest tests/test_pdrbd_dr_switch.py -v` — expected: FAIL (file m
 
 Check `amqsget`'s exit code when the queue drains (it waits ~15 s then exits 0 after "no more messages"); if it is non-zero on a drained queue in this MQ level, keep `set -o pipefail` but accept that specific rc via `failed_when: rpo0_got.rc not in [0, <observed rc>]` and record the observed value in a comment.
 
-- [ ] **Step 4: `ansible/_pdrbd-dr-replication.yml` (site B receiver)**
+- [ ] **Step 4: Site B as its own cluster, the peer list, the DR template, and the DR/HA shape in `pdrbd-qm`**
+
+**(a) `ansible/_pdrbd-dr-replication.yml`.** This is site B's building block: the same blocks as site A, in its **own** cluster. No cluster spans the sites (`rdqm-b1/corosync-conf.txt`, CL-1).
 
 ```yaml
 ---
-# Site B of pcmk-drbd-ubuntu (epic .github#310): the DR receiver. Same building blocks as
-# site A; the per-QM volume is joined as a DRBD peer (no create-md over site A's data —
-# create-md here makes EMPTY metadata that syncs from site A), and the resource group is
-# defined STOPPED so only an operator cutover starts it (RDQM DR secondary semantics).
+# Site B of pcmk-drbd-ubuntu (epic .github#310): an independent 3-node site with its own
+# Pacemaker cluster and its own HA resource, like RDQM's site B (rdqm-b1/quorum.txt,
+# rdqm-b1/drbd-dump.txt). It becomes the DR secondary through the stacked <qm>.dr resource.
 - name: wait for site B to be SSH-ready (cold-boot guard)
   hosts: pdrbd_b
   gather_facts: false
@@ -1951,23 +2353,23 @@ Check `amqsget`'s exit code when the queue drains (it waits ~15 s then exits 0 a
   roles: [pcmk-cluster]
 ```
 
-Then: (a) create `ansible/vars/pdrbd-peers.yml` holding the full peer list, and load it with `vars_files: [vars/pdrbd-peers.yml]` in **both** the site-A and site-B `pdrbd-qm` plays of `site-pdrbd.yml` (replacing the site-A play's inline `pdrbd_peers` from Task 5) —
+**(b) `ansible/vars/pdrbd-peers.yml`.** This holds both sites' nodes. **Each site's HA list is filtered from it, and nothing ever widens a resource across sites.** The pre-capture approach of widening `pdrbd_peers` and running `drbdadm adjust` is deleted.
 
 ```yaml
 ---
-# pcmk-drbd-ubuntu DRBD peers (epic .github#310). hb = same-site sync replication;
-# wan = cross-site async DR. Must match lab/topology.yaml pdrbd-* nics.
+# pcmk-drbd-ubuntu DRBD nodes (epic .github#310). addr_hb: the site-local HA resource
+# (net-hb-<site>, node-ids 0-2 at EACH site, as rdqm-a1/rdqm-b1 drbd-dump.txt). addr_wan:
+# the stacked DR resource's paths (net-wan). Must match lab/topology.yaml pdrbd-* nics.
 pdrbd_peers_all:
   - { name: pdrbd-a1, addr_hb: 172.16.1.71, addr_wan: 10.99.0.71, node_id: 0, site: a }
   - { name: pdrbd-a2, addr_hb: 172.16.1.72, addr_wan: 10.99.0.72, node_id: 1, site: a }
   - { name: pdrbd-a3, addr_hb: 172.16.1.73, addr_wan: 10.99.0.73, node_id: 2, site: a }
-  - { name: pdrbd-b1, addr_hb: 172.16.2.81, addr_wan: 10.99.0.81, node_id: 3, site: b }
-  - { name: pdrbd-b2, addr_hb: 172.16.2.82, addr_wan: 10.99.0.82, node_id: 4, site: b }
-  - { name: pdrbd-b3, addr_hb: 172.16.2.83, addr_wan: 10.99.0.83, node_id: 5, site: b }
-pdrbd_peers: "{{ pdrbd_peers_all if (dr_enabled | default(true) | bool) else pdrbd_peers_all | selectattr('site', 'equalto', 'a') | list }}"
+  - { name: pdrbd-b1, addr_hb: 172.16.2.81, addr_wan: 10.99.0.81, node_id: 0, site: b }
+  - { name: pdrbd-b2, addr_hb: 172.16.2.82, addr_wan: 10.99.0.82, node_id: 1, site: b }
+  - { name: pdrbd-b3, addr_hb: 172.16.2.83, addr_wan: 10.99.0.83, node_id: 2, site: b }
 ```
 
-Add to `tests/test_topology_pdrbd.py` a guard that the vars file matches topology:
+Add the topology guard to `tests/test_topology_pdrbd.py`:
 
 ```python
 def test_pdrbd_peer_vars_match_topology():
@@ -1977,29 +2379,371 @@ def test_pdrbd_peer_vars_match_topology():
         nics = nodes[p["name"]]["nics"]
         hb = nics.get("net-hb-a") or nics.get("net-hb-b")
         assert (p["addr_hb"], p["addr_wan"]) == (hb, nics["net-wan"]), p["name"]
+    for site in ("a", "b"):  # site-local HA node-ids 0-2, as RDQM numbers each site
+        assert sorted(p["node_id"] for p in peers if p["site"] == site) == [0, 1, 2]
 ```
 
-Task 5's template already renders cross-site pairs over `addr_wan` with protocol A, so widening `pdrbd_peers` is the only change site A needs; the site-A play re-renders its `.res` and `drbdadm adjust` adds the new connections. Which network RDQM uses for HA vs DR replication comes from the blueprint; if it differs from hb/wan, change the two address keys, not the template shape.
+**(c) `ansible/roles/pdrbd-qm/templates/qm.dr.res.j2`.** This is the stacked DR resource, laid out as RDQM's `rdqmapp.dr.res` (`rdqm-a1/drbd-conf.txt`). It is rendered on **every** node of the site, each naming itself. The DR resource runs on whichever node is the site's HA primary (`# on rdqm-a1 rdqm-a2 rdqm-a3` in `rdqm-a1/drbd-dump.txt`).
 
-(b) import `_pdrbd-dr-replication.yml` after `_pdrbd-cluster-ha.yml` under `when: dr_enabled | default(true) | bool`; (c) add a site-B play running `pdrbd-qm` with `pdrbd_site_group: pdrbd_b`, `qm_vip: 10.10.2.170`, and a role var `pdrbd_dr_secondary: true`. In `pdrbd-qm`, when `pdrbd_dr_secondary` is true: skip the whole first-time formation block (the data comes from site A); still render the `.res`, `create-md` (empty metadata on site B's own LV), `up`, assert attach, `addmqinf` using site A's captured `pdrbd_addmqinf` (`hostvars[groups['pdrbd_a'][0]].pdrbd_addmqinf.stdout` — the site-A play must run first in the same `ansible-playbook` invocation), and create the Pacemaker resources with `pcs resource create … --disabled` on `drbd_qm` (so site B never promotes on its own). Add the guard test to `tests/test_pdrbd_qm_role.py`:
-
-```python
-def test_dr_secondary_never_runs_first_time_formation():
-    block = next(t for t in yaml.safe_load(TASKS.read_text()) if t.get("name") == "first-time formation on the creation node")
-    assert "pdrbd_dr_secondary" in str(block["when"])
+```jinja
+# {{ ansible_managed }} — RDQM-shaped per-QM DR resource, STACKED on the HA resource
+# (epic .github#310). 2 members: this site's HA primary (stacked-on-top-of) and the other
+# site as ONE logical peer reached over three net-wan paths, protocol A.
+# Values: lab docs/reference/rdqm-blueprint/rdqm-a1/drbd-conf.txt (rdqmapp.dr.res).
+# Rendered per node: the local `host` is this node (rdqm-a2/drbd-dump.txt names rdqm-a2).
+# NOT set, as in RDQM: disk (the HA device is the backing disk), the split-brain policies,
+# the fence policy, handlers (IBM rdqmhandler incl. the snapshot LV path; TL-3/DR-3), tls (#1609).
+resource {{ pdrbd_dr_res }} {
+    options {
+        quorum majority;
+        on-no-quorum io-error;
+        auto-promote no;
+    }
+    volume 0 {
+        device minor {{ pdrbd_dr_minor }};
+    }
+    stacked-on-top-of {{ pdrbd_res }} {
+        node-id {{ pdrbd_dr_local_id }};
+    }
+    on {{ pdrbd_dr_peer_name }} {
+        node-id {{ 1 - (pdrbd_dr_local_id | int) }};
+        volume 0 {
+            disk _remote;
+        }
+    }
+    connection {
+        net {
+            protocol A;
+            verify-alg sha1;
+            allow-remote-read no;
+        }
+{% for r in pdrbd_remote_peers %}
+        path {
+            host {{ inventory_hostname }} address ipv4 {{ pdrbd_my_wan }}:{{ pdrbd_dr_port }};
+            host {{ pdrbd_dr_peer_name }} address ipv4 {{ r.addr_wan }}:{{ pdrbd_dr_port }};
+        }
+{% endfor %}
+    }
+}
 ```
 
-and make the block's `when:` read `not pdrbd_formed and not (pdrbd_dr_secondary | default(false))`.
+**Paths and the logical peer:**
 
-- [ ] **Step 5: `ansible/site-pdrbd-dr-switch.yml`**
+- **Data.** "DRBD allows configuring multiple paths per connection". "The TCP transport uses only one path at a time", and it moves to the next path when the connection drops ([UG] "Configuring multiple paths"). That is how one logical peer follows whichever remote node is that site's HA primary. RDQM reports `DR current remote IP address: 10.99.0.41` (`rdqm-a1/rdqmstatus-qm.txt`).
+- **Judgment.** RDQM names the logical peer `encrypted.remote`, which is also its TLS certificate SAN (BP README §2.1). This arm names it `dr-remote` until lab #1609 decides the TLS naming. The ledger records it under RP-5 as a naming difference.
+- **Judgment.** `disk _remote` is copied verbatim. It is a placeholder for a disk that only the other site has, and the local node never opens it.
+
+**(d) `pdrbd-qm` defaults: add the DR/HA shape.** Replace Task 5's `pdrbd_dr: false` and `pdrbd_fs_device` lines with:
+
+```yaml
+# Shape, fixed when the QM is FIRST created (RDQM: crtmqm -rr; see "The shape decision").
+pdrbd_dr: "{{ dr_enabled | default(true) | bool }}"
+pdrbd_dr_res: "{{ pdrbd_res }}.dr"    # rdqm-a1/drbd-dump.txt (rdqmapp.dr)
+pdrbd_dr_port: 7001                   # rdqm-a1/pcmk-config.txt rdqmapp-dr-port
+pdrbd_dr_minor: 7001                  # rdqm-a1/drbd-dump.txt device minor 7001
+pdrbd_dr_peer_name: dr-remote         # RDQM: encrypted.remote (its TLS SAN); judgment, RP-5
+# The ONE device mkfs formats and Pacemaker mounts: the STACKED device when DR is built
+# (rdqm-a1/pcmk-config.txt device=/dev/drbd/by-res/rdqmapp.dr/0), else the HA device.
+pdrbd_fs_device: "/dev/drbd/by-res/{{ pdrbd_dr_res if pdrbd_dr | bool else pdrbd_res }}/0"
+```
+
+The play derives the per-host values from `pdrbd_peers_all` and `pdrbd_site` (see (e)):
+
+- `pdrbd_site_peers`: this site's three nodes.
+- `pdrbd_remote_peers`: the other site's three nodes.
+- `pdrbd_my_wan`: this node's `addr_wan`.
+- `pdrbd_dr_local_id`: `0` at site A, `1` at site B (`rdqm-a1/drbd-dump.txt`, `rdqm-b1/drbd-dump.txt`).
+
+**(e) `ansible/site-pdrbd.yml`.**
+
+- Delete Task 5's preflight play.
+- Import `_pdrbd-dr-replication.yml` after `_pdrbd-cluster-ha.yml`, under `when: dr_enabled | default(true) | bool`.
+- Run `mq-authz-accounts` on `pdrbd_a{{ ':pdrbd_b' if (dr_enabled | default(true) | bool) else '' }}`.
+- Replace Task 5's site-A-only `pdrbd-qm` play with **one** play over both sites. The formation steps then interleave across the two sites in task order (Ansible's linear strategy). The stacked resource needs that: site B's DR member must be up before site A clears the DR bitmap.
+
+```yaml
+- name: per-QM replicated volume + resources (site A, and site B as DR secondary)
+  hosts: "pdrbd_a{{ ':pdrbd_b' if (dr_enabled | default(true) | bool) else '' }}"
+  become: true
+  vars_files: [vars/pdrbd-peers.yml]
+  vars:
+    qm_name: "{{ qm_app }}"
+    svc_conn: "svc-sim-ext.service.com"
+    pdrbd_site: "{{ 'a' if inventory_hostname in groups['pdrbd_a'] else 'b' }}"
+    pdrbd_site_group: "pdrbd_{{ pdrbd_site }}"
+    qm_vip: "{{ '10.10.1.170' if pdrbd_site == 'a' else '10.10.2.170' }}"
+    pdrbd_site_peers: "{{ pdrbd_peers_all | selectattr('site', 'equalto', pdrbd_site) | list }}"
+    pdrbd_remote_peers: "{{ pdrbd_peers_all | rejectattr('site', 'equalto', pdrbd_site) | list }}"
+    pdrbd_my_wan: "{{ (pdrbd_peers_all | selectattr('name', 'equalto', inventory_hostname) | first).addr_wan }}"
+    pdrbd_dr_local_id: "{{ 0 if pdrbd_site == 'a' else 1 }}"
+  roles: [pdrbd-qm]
+```
+
+**(f) `pdrbd-qm` tasks: the DR/HA shape.** Change Task 5's `tasks/main.yml` as follows.
+
+**(f1) After `record formation state`**, add the DR probe and the shape guard:
+
+```yaml
+- name: probe — does this site's Pacemaker already own the QM's DR DRBD resource?
+  ansible.builtin.command: pcs resource status drbd_dr_qm
+  register: pdrbd_dr_owned
+  changed_when: false
+  failed_when: pdrbd_dr_owned.rc not in [0, 1]
+  become: true
+
+- name: the DR shape of a formed QM never changes (RDQM fixes it at crtmqm -rr)
+  # Moving a live filesystem from the HA device onto a stacked device is not done: the
+  # stacked resource's internal metadata goes at the END of the HA device ([UG] "Internal
+  # meta data") and would overwrite the filesystem's tail.
+  ansible.builtin.assert:
+    that: not pdrbd_formed or ((pdrbd_dr_formed | bool) == (pdrbd_dr | bool))
+    fail_msg: >-
+      {{ qm_name }} was formed {{ 'with' if pdrbd_dr_formed | bool else 'without' }} DR, and
+      this run asks for {{ 'DR' if pdrbd_dr | bool else 'no DR' }}. The DR shape is fixed at
+      creation; destroy and re-create the QM (qm-destroy, then bootstrap) to change it.
+  vars:
+    pdrbd_dr_formed: "{{ pdrbd_dr_owned.rc == 0 }}"
+```
+
+**(f2) After the HA `.res` template**, render the DR template on every node when `pdrbd_dr`, before `drbdadm dump all`. A `.dr.res` that this drbd-utils rejects then fails at the parse check, loud.
+
+```yaml
+- name: DR resource definition (stacked; rendered per node, RDQM's rdqmapp.dr.res)
+  ansible.builtin.template:
+    src: qm.dr.res.j2
+    dest: "/etc/drbd.d/{{ pdrbd_dr_res }}.res"
+    mode: "0644"
+  when: pdrbd_dr | bool
+  become: true
+```
+
+**(f3) Replace Task 5's `first-time formation on this site's creation node` block** with three blocks. The task names keep the test fragments. "Once per site" is `inventory_hostname == pdrbd_creator`. "Site A only" is `inventory_hostname == groups['pdrbd_a'][0]`.
+
+```yaml
+- name: HA formation on each site's creation node
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
+  become: true
+  block:
+    - name: wait for the site peers to connect
+      # `drbdadm status` omits the connection field while Connected (rdqm-a1/drbd-status.txt
+      # shows only `rdqm-a2 role:Secondary`), so count it from `drbdsetup status --verbose`.
+      ansible.builtin.shell: |
+        set -o pipefail
+        for i in $(seq 1 60); do
+          n=$(drbdsetup status --verbose {{ pdrbd_res }} | grep -c 'connection:Connected' || [ $? -eq 1 ])
+          [ "$n" -ge 2 ] && { echo connected; exit 0; }
+          sleep 2
+        done
+        drbdsetup status --verbose {{ pdrbd_res }}; exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    # Blank disks, all site peers up: declare UpToDate without a full sync
+    # (docs/reference/drbd-operations.md "the real fix"). auto-promote is no, so promote.
+    - name: HA initial promote (fresh volume, skip the full initial sync)
+      ansible.builtin.shell: |
+        set -e
+        drbdadm new-current-uuid --clear-bitmap {{ pdrbd_res }}/0
+        drbdadm primary {{ pdrbd_res }}
+      changed_when: true
+
+- name: DR formation on each site's creation node (stacked on the now-Primary HA device)
+  when:
+    - pdrbd_dr | bool
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
+  become: true
+  block:
+    # drbd-operations.md lessons, applied to the stacked resource: probe live state first
+    # (`drbdsetup status` never blocks; `drbdadm status all` does not list stacked
+    # resources, BP README §2.1), bound every metadata op, close stdin. The stacked
+    # metadata is written INTO the HA device and so replicates to the site peers.
+    - name: stacked create-md (DR metadata inside the HA device)
+      ansible.builtin.shell: |
+        set -e
+        if drbdsetup status {{ pdrbd_dr_res }} >/dev/null 2>&1; then
+          echo resource-up
+        elif timeout 30 drbdadm -S dump-md {{ pdrbd_dr_res }} </dev/null >/dev/null 2>&1; then
+          echo md-exists
+        else
+          timeout 60 drbdadm -S create-md --force {{ pdrbd_dr_res }} </dev/null
+          echo created
+        fi
+      register: pdrbd_dr_md
+      changed_when: "'created' in pdrbd_dr_md.stdout"
+
+    - name: stacked up
+      ansible.builtin.shell: |
+        set -e
+        if drbdsetup status {{ pdrbd_dr_res }} >/dev/null 2>&1; then echo already-up
+        else drbdadm -S up {{ pdrbd_dr_res }}; echo up; fi
+      register: pdrbd_dr_up
+      changed_when: "'up' == pdrbd_dr_up.stdout"
+
+    - name: assert the stacked DR disk attached
+      ansible.builtin.command: drbdsetup status {{ pdrbd_dr_res }}
+      register: pdrbd_dr_state
+      changed_when: false
+      failed_when: >-
+        pdrbd_dr_state.rc != 0
+        or 'disk:Diskless' in pdrbd_dr_state.stdout
+        or pdrbd_dr_state.stdout | length == 0
+
+- name: QM creation (site A creation node only — site B receives it over the DR resource)
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == groups['pdrbd_a'][0]
+  become: true
+  block:
+    - name: wait for the DR peer to connect (both sites' DR members are up)
+      ansible.builtin.shell: |
+        set -o pipefail
+        for i in $(seq 1 90); do
+          drbdsetup status --verbose {{ pdrbd_dr_res }} | grep -q 'connection:Connected' && { echo connected; exit 0; }
+          sleep 2
+        done
+        drbdsetup status --verbose {{ pdrbd_dr_res }}; exit 1
+      args:
+        executable: /bin/bash
+      changed_when: false
+      when: pdrbd_dr | bool
+
+    # Both DR members are blank and connected, so clear the DR bitmap too: the DR initial
+    # sync is skipped, and mkfs + QM writes replicate as ordinary protocol-A traffic.
+    # mkfs targets pdrbd_fs_device: the STACKED device when DR is built, because the
+    # stacked metadata makes it smaller than the HA device ([UG] stacking considerations).
+    - name: initial promote + mkfs (on the device that is finally mounted)
+      ansible.builtin.shell: |
+        set -e
+        {% if pdrbd_dr | bool %}
+        drbdadm -S new-current-uuid --clear-bitmap {{ pdrbd_dr_res }}/0
+        drbdadm -S primary {{ pdrbd_dr_res }}
+        {% endif %}
+        mkfs.{{ pdrbd_fstype }} -q {{ pdrbd_fs_device }}
+      changed_when: true
+```
+
+**Then:**
+
+- Keep Task 5's remaining creation-node tasks (mount, `crtmqm`, keystore, MQSC, event monitor, `endmqm`, capture `addmqinf`) **inside this site-A block**, unchanged. They use `pdrbd_fs_device`.
+- Replace Task 5's `release the volume and demote` with a release on **each** site's creation node, run after the site-A block:
+
+```yaml
+- name: release the volumes (Pacemaker owns promotion and the stacked up/down from here)
+  ansible.builtin.shell: |
+    set -e
+    if mountpoint -q {{ pdrbd_mount }}; then umount {{ pdrbd_mount }}; fi
+    {% if pdrbd_dr | bool %}
+    drbdadm -S secondary {{ pdrbd_dr_res }}
+    drbdadm -S down {{ pdrbd_dr_res }}
+    {% endif %}
+    drbdadm secondary {{ pdrbd_res }}
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
+  changed_when: true
+  become: true
+```
+
+**Notes on formation:**
+
+- **The release order is forced.** The stacked resource is taken down before the HA resource is demoted, because the lower device "must be in the Primary role" while the stacked one runs ([UG]). The HA resource stays up as Secondary, which matches Task 5.
+- **Judgment.** Taking the stacked resource down keeps its metadata, including the cleared-bitmap UUIDs, so the DR clone's first start reconnects without a full sync. Step 5b's watched wait proves this live and does not assume it.
+- **`drbdadm -S`.** It follows [UG]. [ocf] notes that drbd-utils ≥ 9.5.0 also resolves an explicitly named stacked resource without `--stacked`, so `-S` is belt and braces. If this drbd-utils rejects `-S` on a subcommand, drop it for that subcommand and record which one.
+
+**(f4) The `addmqinf` task** (Task 5) already takes the definition from `groups['pdrbd_a'][0]` and runs on every other node, so all six nodes carry it, as RDQM's do (`rdqm-b1/dspmqinf.txt`).
+
+**(f5) Replace Task 5's `Pacemaker resources` task.** It runs on each site's creation node, first time only, and builds a CIB file that is pushed atomically. It takes the DR layer when `pdrbd_dr`:
+
+```yaml
+- name: Pacemaker resources (first-time only; built in a CIB file and pushed atomically)
+  # Values: rdqm-a1/pcmk-config.txt (site A), rdqm-b1/pcmk-config.txt (site B).
+  when:
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
+  become: true
+  ansible.builtin.shell: |
+    set -e
+    cib=$(mktemp); trap 'rm -f "$cib"' EXIT
+    pcs cluster cib "$cib"
+    pcs -f "$cib" resource create drbd_qm ocf:linbit:drbd drbd_resource={{ pdrbd_res }} \
+      adjust_master_score="0 10 10000 10000" \
+      op monitor interval=20s timeout=20s role=Unpromoted \
+      op monitor interval=10s timeout=20s role=Promoted \
+      op start timeout=240s op stop timeout=100s op promote timeout=90s op demote timeout=90s \
+      promotable notify=true
+    {% if pdrbd_dr | bool %}
+    pcs -f "$cib" resource create drbd_dr_qm ocf:linbit:drbd drbd_resource={{ pdrbd_dr_res }} wfc_timeout=false \
+      op monitor interval=20s timeout=20s role=Unpromoted \
+      op monitor interval=10s timeout=20s role=Promoted \
+      op start timeout=240s op stop timeout=100s op promote timeout=90s op demote timeout=90s \
+      promotable notify=true clone-max=1
+    # The DR role marker (rdqm-a1 Promoted / rdqm-b1 Unpromoted on ms_drbd_dr_rdqmapp).
+    pcs -f "$cib" resource meta drbd_dr_qm-clone target-role={{ 'Promoted' if pdrbd_site == 'a' else 'Unpromoted' }}
+    {% endif %}
+    pcs -f "$cib" resource create mq_fs ocf:heartbeat:Filesystem device={{ pdrbd_fs_device }} \
+      directory={{ pdrbd_mount }} fstype={{ pdrbd_fstype }} options={{ pdrbd_mount_opts }} \
+      force_unmount=safe fast_stop=no \
+      op start timeout=60s op stop timeout=60s --no-default-ops --group mq_group
+    pcs -f "$cib" resource create mq_vip ocf:heartbeat:IPaddr2 ip={{ qm_vip }} cidr_netmask=24 \
+      op monitor interval=30s --group mq_group --after mq_fs
+    pcs -f "$cib" resource create mq_qm systemd:mq-{{ qm_name }} \
+      op monitor interval=30s timeout=60s op start timeout=300s op stop timeout=300s \
+      --group mq_group --after mq_vip
+    {% if pdrbd_dr | bool %}
+    pcs -f "$cib" constraint colocation add drbd_dr_qm-clone with Promoted drbd_qm-clone INFINITY
+    pcs -f "$cib" constraint order promote drbd_qm-clone then start drbd_dr_qm-clone
+    pcs -f "$cib" constraint colocation add mq_group with Promoted drbd_dr_qm-clone INFINITY
+    pcs -f "$cib" constraint order promote drbd_dr_qm-clone then start mq_group
+    pcs -f "$cib" constraint order start drbd_dr_qm-clone then start mq_group
+    {% else %}
+    pcs -f "$cib" constraint colocation add mq_group with Promoted drbd_qm-clone INFINITY
+    pcs -f "$cib" constraint order promote drbd_qm-clone then start mq_group
+    {% endif %}
+    pcs -f "$cib" constraint location mq_group prefers {{ pdrbd_creator }}={{ pdrbd_preferred_score }}
+    pcs cluster cib-push "$cib" --config
+  changed_when: true
+
+- name: DR role marker in the CIB (mirrors RDQM's rdqm:<qm>-dr-role; 1 primary, 2 secondary)
+  ansible.builtin.command: >-
+    crm_attribute --type crm_config --set-name pdrbd --name {{ pdrbd_res }}-dr-role
+    --update {{ 1 if pdrbd_site == 'a' else 2 }}
+  when:
+    - pdrbd_dr | bool
+    - not pdrbd_formed
+    - inventory_hostname == pdrbd_creator
+  changed_when: true
+  become: true
+```
+
+The two DR orders both copy RDQM: `ms_drbd_dr_rdqmapp:promote` and `ms_drbd_dr_rdqmapp:start`, each → `p_fs_rdqmapp:start` (`rdqm-a1/pcmk-config.txt`). Confirm `crm_attribute --set-name` with `crm_attribute --help` on the box. **Judgment:** `1`/`2` copies RDQM's values; their meaning (primary/secondary) is inferred from `rdqmstatus` (`rdqm-a1/rdqmstatus-qm.txt` "DR role: Primary", `rdqm-b1/rdqmstatus-qm.txt` "DR role: Secondary").
+
+**(f6) Replace Task 5's `wait for the QM to run under Pacemaker`** with a per-site end-state check:
+
+- **Site A** (`groups['pdrbd_a'][0]`): the existing wait for `mq_qm` Started.
+- **Site B** (`groups['pdrbd_b'][0]`, when `pdrbd_dr`): assert the blueprint's DR-secondary steady state (`rdqm-b1/pcmk-status.txt`). That means `drbd_qm-clone` Promoted on one node, `drbd_dr_qm-clone` running Unpromoted on that same node, and `mq_fs`/`mq_vip`/`mq_qm` Stopped. Poll `crm_mon -1 -r` up to 300 s and fail with its output on timeout.
+
+- [ ] **Step 5: `ansible/site-pdrbd-dr-switch.yml` (RDQM-style DR demote/promote)**
+
+**What `rdqmdr` changes (Judgment, inferred; BP README §4).** The capture shows only the steady state.
+
+- **Data.** The two sites differ in exactly two places: the DR clone's `target-role` (`Promoted` at A, `Unpromoted` at B) and the `rdqm:` property `rdqmapp-dr-role` (`1`/`2`). Each site's HA clone stays Promoted regardless (`rdqm-a1/pcmk-config.txt`, `rdqm-b1/pcmk-config.txt`, `rdqm-b1/pcmk-status.txt`).
+- **Data (IBM).** `rdqmdr -s` makes a primary into a secondary. `-p` makes a secondary into a primary, and "fails if the primary instance of the queue manager is still running and the DR replication link is still functioning" (IBM `rdqmdr`, 10.0.x).
+- **Inference.** `rdqmdr -s` sets the DR clone to `Unpromoted`. The constraint chain then stops QM → ip → fs, and the DR resource demotes. `rdqmdr -p` sets it to `Promoted`, and the chain starts fs → ip → QM. Each also flips `<qm>-dr-role`. The playbook does exactly that, and nothing else: **the HA clone at both sites is never disabled.**
+- **Task 8.** Drill 5 compares the result against a live `rdqmdr` switch on RDQM. Record `crm configure show` on both RDQM sites before and after.
 
 ```yaml
 ---
-# Operator-driven cross-site switch for pcmk-drbd-ubuntu (epic .github#310) — the
-# open-source counterpart of `rdqmdr -s` (source) + `rdqmdr -p` (target). Run via
-# `mqlab dr cutover|failback pcmk-drbd-ubuntu [--rpo0-drill]`, which passes dr_direction,
-# qm_name and rpo0_drill. dr_force=true (manual only) permits promoting an Outdated
-# target after the source site is lost — the forced-DR drill.
+# Operator-driven cross-site switch for pcmk-drbd-ubuntu (epic .github#310): RDQM-style DR
+# demote (`rdqmdr -s`) at the source, then DR promote (`rdqmdr -p`) at the target. Only the
+# DR clone's target-role and the dr-role marker move; each site's HA layer stays up (as
+# rdqm-b1/pcmk-status.txt shows under a DR secondary). Run via
+# `mqlab dr cutover|failback pcmk-drbd-ubuntu [--rpo0-drill]` (dr_direction, qm_name,
+# rpo0_drill). dr_force=true (manual only) promotes the target after the source site is
+# LOST — the forced-DR drill; its RPO>0 is the expected outcome.
 - name: resolve direction
   hosts: localhost
   gather_facts: false
@@ -2023,13 +2767,21 @@ and make the block's `when:` read `not pdrbd_formed and not (pdrbd_dr_secondary 
   gather_facts: false
   vars:
     pdrbd_res: "{{ qm_name | lower }}"
+    pdrbd_dr_res: "{{ qm_name | lower }}.dr"
     src: "{{ hostvars['localhost'].dr_src }}"
     dst: "{{ hostvars['localhost'].dr_dst }}"
+    dr_force_b: "{{ dr_force | default(false) | bool }}"
+    # The node running a given role (ROLE, substituted per task) of the DR clone, from
+    # crm_mon. A top-level resource line resets the match, so another clone's role line
+    # is never read by mistake.
+    dr_clone_node_awk: >-
+      awk -v want=ROLE '/^  \* /{f=index($0,"drbd_dr_qm-clone")>0}
+      f && $0 ~ "^    \\* "want{gsub(/[\[\]]/,""); print $NF; exit}'
   tasks:
-    - name: find the source site's promoted node (skipped on a forced cutover)
+    - name: find the source site's DR-promoted node (skipped on a forced cutover)
       ansible.builtin.shell: |
         set -o pipefail
-        crm_mon -1 -r | awk '/drbd_qm-clone/{f=1} f && /Promoted:/{gsub(/[\[\]]/,""); print $NF; exit}'
+        crm_mon -1 -r | {{ dr_clone_node_awk | replace('ROLE', 'Promoted') }}
       args:
         executable: /bin/bash
       delegate_to: "{{ groups[src][0] }}"
@@ -2037,7 +2789,7 @@ and make the block's `when:` read `not pdrbd_formed and not (pdrbd_dr_secondary 
       changed_when: false
       failed_when: src_promoted.rc != 0 or src_promoted.stdout | length == 0
       become: true
-      when: not (dr_force | default(false))
+      when: not dr_force_b
 
     - name: RPO-0 seed on the live QM
       ansible.builtin.include_tasks: tasks/rpo0-drill-seed.yml
@@ -2045,65 +2797,103 @@ and make the block's `when:` read `not pdrbd_formed and not (pdrbd_dr_secondary 
         rpo0_node: "{{ src_promoted.stdout }}"
       when: rpo0_drill | default(false) | bool
 
-    - name: stop and demote at the source site (disable the group, then the DRBD clone)
+    - name: stop and demote at the source site (DR clone to Unpromoted; HA stays up)
       ansible.builtin.shell: |
         set -e
-        pcs resource disable mq_group --wait=300
-        pcs resource disable drbd_qm-clone --wait=300
+        pcs resource meta drbd_dr_qm-clone target-role=Unpromoted --wait=300
+        crm_attribute --type crm_config --set-name pdrbd --name {{ pdrbd_res }}-dr-role --update 2
       delegate_to: "{{ groups[src][0] }}"
       changed_when: true
       become: true
-      when: not (dr_force | default(false))
+      when: not dr_force_b
 
-    - name: target disk state
-      ansible.builtin.command: drbdadm dstate {{ pdrbd_res }}
+    - name: assert the source DR resource is Secondary (rdqmdr -p refuses a running primary)
+      ansible.builtin.command: drbdsetup status {{ pdrbd_dr_res }}
+      delegate_to: "{{ src_promoted.stdout }}"
+      register: src_dr
+      changed_when: false
+      failed_when: src_dr.rc != 0 or 'role:Secondary' not in (src_dr.stdout.splitlines() | first | default(''))
+      become: true
+      when: not dr_force_b
+
+    - name: find the target site's DR member (its HA primary, DR clone Unpromoted)
+      ansible.builtin.shell: |
+        set -o pipefail
+        crm_mon -1 -r | {{ dr_clone_node_awk | replace('ROLE', 'Unpromoted') }}
+      args:
+        executable: /bin/bash
       delegate_to: "{{ groups[dst][0] }}"
+      register: dst_member
+      changed_when: false
+      failed_when: dst_member.rc != 0 or dst_member.stdout | length == 0
+      become: true
+
+    - name: target disk state (stacked resource; `drbdadm status all` does not list it)
+      ansible.builtin.shell: |
+        set -o pipefail
+        drbdsetup status {{ pdrbd_dr_res }} | sed -n 's/^ *disk:\([A-Za-z]*\).*/\1/p' | head -n 1
+      args:
+        executable: /bin/bash
+      delegate_to: "{{ dst_member.stdout }}"
       register: dst_dstate
       changed_when: false
+      failed_when: dst_dstate.rc != 0 or dst_dstate.stdout | length == 0
       become: true
 
     - name: assert the target's disk is UpToDate (or Outdated under explicit dr_force)
       ansible.builtin.assert:
         that: >-
-          dst_dstate.stdout.split('/')[0] == 'UpToDate'
-          or ((dr_force | default(false)) and dst_dstate.stdout.split('/')[0] == 'Outdated')
+          dst_dstate.stdout == 'UpToDate'
+          or (dr_force_b and dst_dstate.stdout == 'Outdated')
         fail_msg: >-
-          target disk is {{ dst_dstate.stdout }} — refusing to promote. Wait for resync,
+          target DR disk is {{ dst_dstate.stdout }} — refusing to promote. Wait for resync,
           or pass -e dr_force=true for a forced DR that accepts the RPO>0 loss.
 
-    - name: promote at the target site (enable the DRBD clone, then the group)
+    - name: promote at the target site (DR clone to Promoted; the chain starts fs, vip, QM)
       ansible.builtin.shell: |
         set -e
-        pcs resource enable drbd_qm-clone --wait=300
-        pcs resource enable mq_group --wait=300
+        pcs resource meta drbd_dr_qm-clone target-role=Promoted --wait=600
+        crm_attribute --type crm_config --set-name pdrbd --name {{ pdrbd_res }}-dr-role --update 1
       delegate_to: "{{ groups[dst][0] }}"
       changed_when: true
       become: true
 
-    - name: find the target site's promoted node
+    - name: assert the target DR resource is Primary and the QM Started
+      # A refused promote fails here with the live state, e.g. `quorum:no` on a forced
+      # cutover — a recorded finding (Task 8 drill 6), never a silent no-op.
       ansible.builtin.shell: |
         set -o pipefail
-        crm_mon -1 -r | awk '/drbd_qm-clone/{f=1} f && /Promoted:/{gsub(/[\[\]]/,""); print $NF; exit}'
+        st=$(drbdsetup status --verbose {{ pdrbd_dr_res }})
+        grep -q 'role:Primary' <<<"$(head -n 1 <<<"$st")" || { echo "$st" >&2; exit 1; }
+        crm_mon -1 -r | grep -Eq 'mq_qm.*Started' || { crm_mon -1 -r >&2; exit 1; }
       args:
         executable: /bin/bash
-      delegate_to: "{{ groups[dst][0] }}"
-      register: dst_promoted
+      delegate_to: "{{ dst_member.stdout }}"
       changed_when: false
-      failed_when: dst_promoted.rc != 0 or dst_promoted.stdout | length == 0
       become: true
 
     - name: RPO-0 verify at the new live QM
       ansible.builtin.include_tasks: tasks/rpo0-drill-verify.yml
       vars:
-        rpo0_node: "{{ dst_promoted.stdout }}"
+        rpo0_node: "{{ dst_member.stdout }}"
       when: rpo0_drill | default(false) | bool
 ```
 
-Run `crm_mon -1 -r` on a live site once (Task 5's bring-up) and adjust the `awk` to the actual "Promoted:" line format of this Pacemaker version before relying on it; the test asserts ordering, the live run asserts the parse.
+**Notes on the switch:**
 
-- [ ] **Step 5b: Watched wait for the DR initial sync (spec §7)**
+- **Forced DR (`dr_force`).** The source site is lost, so every source step is skipped. Site B's DR clone is still running Unpromoted on its HA primary (DR-1), and promotion goes through Pacemaker exactly as in a planned switch. The only difference is the relaxed disk-state gate. Whether DRBD lets a 2-member DR resource promote after an ungraceful loss of its peer is the open DR-quorum question above: Drill 6 records it, and the playbook does not work around it.
+- **After a forced DR.** The resources leave `after-sb-*` unset (RP-7). When site A returns, its stacked DR resource reconnects to a peer that diverged. What DRBD does then is observed in Drill 6, not assumed. Reconnecting the old primary is an operator step (`drbdadm -S connect --discard-my-data <qm>.dr` on the stale side), and Drill 6 records it with its output.
+- **The `crm_mon` parse.** It assumes the Pacemaker 3.0.1 list format captured in `rdqm-b1/pcmk-status.txt`: top-level resources are indented two spaces and start with an asterisk, and clone roles are indented four spaces (`Promoted:` / `Unpromoted (target-role):`). Task 5 Step 11 recorded Ubuntu's `crm_mon` format. Adjust the awk to it before relying on it. The tests assert the ordering, and the live run asserts the parse.
 
-Site B joins after site A already holds the QM, so its peers start a **full** sync over `net-wan`. Provision must not report success until DR is actually in sync, and a stalled sync must fail, not hang. Add this test to `tests/test_pdrbd_dr_switch.py`:
+- [ ] **Step 5b: Watched wait for DR sync (spec §7)**
+
+Formation clears both bitmaps, so a fresh build needs no full DR sync. The watched wait still runs:
+
+- It proves that, rather than assuming it.
+- It catches a DR resource that came up Inconsistent.
+- It covers any provision where a full sync does start, for example after a forced DR.
+
+A stalled sync must fail, not hang. Add this test to `tests/test_pdrbd_dr_switch.py`:
 
 ```python
 SITE = pathlib.Path("ansible/site-pdrbd.yml")
@@ -2117,29 +2907,32 @@ def test_provision_waits_for_dr_sync_with_a_stall_window():
     assert site_b < wait
     body = str(plays[wait])
     assert "pdrbd_sync_stall_secs" in body and "pdrbd_sync_max_secs" in body
+    assert "drbdsetup status" in body  # drbdadm status all omits the stacked resource
     assert "dr_enabled" in str(plays[wait]["tasks"][0].get("when", ""))
 ```
 
-Then append to `ansible/site-pdrbd.yml`, after the site-B `pdrbd-qm` play (name that play `per-QM replicated volume (site B, DR secondary)` so the test can find it):
+Then append to `ansible/site-pdrbd.yml`, after the `pdrbd-qm` play (Step 4(e)). That play's name contains "site B" and "volume", so the test finds it.
 
 ```yaml
-# The DR receiver starts a FULL initial sync (site A already holds the QM). Watch it: log
-# progress, fail if the sync percentage does not advance within pdrbd_sync_stall_secs, and
-# fail outright past pdrbd_sync_max_secs — a stall is a failure, not a wait (spec §7).
-- name: wait for DR sync (every peer UpToDate), watched
-  hosts: "{{ groups['pdrbd_a'][0] }}"
+# Watch the DR resource reach UpToDate/UpToDate: log progress, fail if the sync percentage
+# does not advance within pdrbd_sync_stall_secs, and fail outright past pdrbd_sync_max_secs
+# — a stall is a failure, not a wait (spec §7). Runs on every site-A node; only the node
+# holding the stacked resource (the site-A HA primary) has it and does the work.
+- name: wait for DR sync (the stacked DR resource UpToDate on both members), watched
+  hosts: pdrbd_a
   become: true
   vars:
-    pdrbd_res: "{{ qm_app | lower }}"
+    pdrbd_dr_res: "{{ qm_app | lower }}.dr"
     pdrbd_sync_stall_secs: 180
     pdrbd_sync_max_secs: 3600
   tasks:
-    - name: poll drbdadm status until all peers are UpToDate
+    - name: poll drbdsetup status until the DR peer is UpToDate
       ansible.builtin.shell: |
         set -o pipefail
+        if ! drbdsetup status {{ pdrbd_dr_res }} >/dev/null 2>&1; then echo not-here; exit 0; fi
         start=$(date +%s); last_pct=""; last_move=$start
         while :; do
-          st=$(drbdadm status {{ pdrbd_res }})
+          st=$(drbdsetup status --verbose {{ pdrbd_dr_res }})
           if ! grep -Eq 'peer-disk:(Inconsistent|Outdated|DUnknown)|replication:(SyncSource|SyncTarget|WFBitMap)' <<<"$st"; then
             echo "in-sync after $(( $(date +%s) - start ))s"; exit 0
           fi
@@ -2158,15 +2951,37 @@ Then append to `ansible/site-pdrbd.yml`, after the site-B `pdrbd-qm` play (name 
         done
       args:
         executable: /bin/bash
+      register: pdrbd_dr_sync
       changed_when: false
       when: dr_enabled | default(true) | bool  # plays take no `when:`; gate the task
+
+    - name: exactly one site-A node held the DR resource and reported in-sync
+      ansible.builtin.assert:
+        that: >-
+          groups['pdrbd_a'] | map('extract', hostvars, ['pdrbd_dr_sync', 'stdout'])
+          | select('match', '^in-sync') | list | length == 1
+        fail_msg: "no site-A node (or more than one) holds {{ pdrbd_dr_res }} — check crm_mon"
+      run_once: true
+      when: dr_enabled | default(true) | bool
 ```
 
-The resync buffers from `docs/reference/drbd-operations.md` (`max-buffers 80k`, `sndbuf-size 2M`, `rcvbuf-size 2M`, `c-plan-ahead 0`, `resync-rate 500M`) belong in the cross-site `connection { net { … } }` / `disk { … }` blocks of `qm.res.j2` unless the blueprint shows RDQM's own values — without them the #67 finding applies (~250 KB/s initial resync). Before relying on the `grep` patterns, run `drbdadm status <res>` during a live sync once and confirm the state words (`replication:SyncSource`, `done:`) for this DRBD 9 version.
+**Resync tuning.** The pre-capture plan proposed the `drbd-operations.md` buffers (`max-buffers 80k`, `sndbuf-size 2M`, `rcvbuf-size 2M`, `c-plan-ahead 0`, `resync-rate 500M`) "unless the blueprint shows RDQM's own values". It does: `max-buffers 40k`, `c-fill-target 1M`, `c-max-rate 500M` and `c-min-rate 100M`, in the common section (`rdqm-a1/drbd-conf.txt`, RP-6). Task 5's `global_common.conf.j2` applies them to both resources. Their `c-min-rate 100M` also removes `drbd-operations.md`'s root cause #2 (a `c-min-rate` of 0 lets application I/O starve the resync).
+
+Before relying on the `grep` patterns, run `drbdsetup status --verbose <qm>.dr` during a live sync once (for example after Drill 6's reconnect). Confirm the state words (`replication:SyncSource`, `done:`) for this DRBD 9 version.
+
+- [ ] **Step 5c: `site-pdrbd-qm-down.yml` and the `qm-status` verb**
+
+**`site-pdrbd-qm-down.yml`.** It now covers both sites (`hosts: "pdrbd_a{{ ':pdrbd_b' if (dr_enabled | default(true) | bool) else '' }}"`), and each step runs once **per site** (`inventory_hostname == groups['pdrbd_' + site][0]`), never `run_once`.
+
+- **Resource delete order:** `mq_qm mq_vip mq_fs drbd_dr_qm drbd_qm`.
+- **Per node:** if `drbdsetup status <qm>.dr` succeeds, run `drbdadm -S down <qm>.dr`. Remove `/etc/drbd.d/<qm>.dr.res`. Then run the HA teardown (down, wipe-md, rm, lvremove). The stacked metadata lives inside the HA device, so it goes with the LV.
+- **Per site:** `crm_attribute --type crm_config --set-name pdrbd --name <qm>-dr-role --delete` when present.
+
+**`lab/topology.yaml` `pcmk-drbd-ubuntu` verbs.** Set `qm-status: { cmd: "pcs status resources && drbdsetup status --verbose" }`. `drbdadm status all` omits the stacked resource (BP README §2.1). This matches the updated `test_pdrbd_verbs`.
 
 - [ ] **Step 6: Run tests; validate**
 
-Run: `uv run pytest tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py -v` — expected: PASS.
+Run: `uv run pytest tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py tests/test_topology_pdrbd.py -v` — expected: PASS.
 Run: `vrg-container-run -- vrg-validate` — expected: green.
 
 - [ ] **Step 7: Operator brings up full HA+DR and exercises the switch (human step)**
@@ -2180,49 +2995,124 @@ mqlab dr failback pcmk-drbd-ubuntu --rpo0-drill
 mqlab qm e2e pcmk-drbd-ubuntu
 ```
 
-Expected: site B's DRBD peers show UpToDate before the cutover; both switches succeed with the RPO-0 token found; `qm e2e` round-trips after failback. Paste outputs into the issue.
+The teardown matters: the shape is fixed when the QM is created, so the DR/HA shape is built fresh rather than converted from Task 5's HA-only volume.
+
+**Expected, matching the blueprint state by state:**
+
+- **The DR-sync wait** ends `in-sync after <n>s`.
+- **Site A** (`rdqm-a1/drbd-status.txt`, `rdqm-a1/pcmk-status.txt`):
+  - `drbd_qm-clone` is Promoted on a1, and `drbd_dr_qm-clone` is Promoted on a1.
+  - `drbdsetup status --verbose pdrbdapp.dr` shows Primary, `disk:UpToDate` and `quorum:yes`, Connected to `dr-remote`.
+  - `findmnt /var/mqm/vols/pdrbdapp` shows `/dev/drbd7001`.
+  - `lsblk` shows `drbdpool-pdrbdapp_00 → drbd100 → drbd7001`.
+- **Site B** (`rdqm-b1/pcmk-status.txt`, `rdqm-b1/drbd-status.txt`):
+  - `drbd_qm-clone` is Promoted on b1, Unpromoted on b2 and b3.
+  - `drbd_dr_qm-clone` is Unpromoted on b1.
+  - `mq_group` is Stopped.
+  - `pdrbdapp.dr` is Secondary and UpToDate.
+- **The switches.** Both succeed with the RPO-0 token found. After each switch the two sites have exchanged exactly the DR clone role and the `dr-role` marker, and each site's HA clone stayed Promoted throughout.
+- **`qm e2e`** round-trips after failback.
+
+Paste the outputs into the issue, including `pcs config` from both sites.
+
+**Early DR-quorum check (Judgment: early warning, not acceptance).** With the stack in its post-failback steady state, run Task 8 Drill 3b once on this arm. If the live primary's QM takes I/O errors when the WAN is cut, stop and report to the owner before Task 7. That would be a finding about copying `quorum majority` / `on-no-quorum io-error` onto a 2-member resource without IBM's `disconnected` handler.
 
 - [ ] **Step 8: Ledger + parity + commit**
 
-Update the DR rows of `docs/reference/rdqm-vs-vanilla-deviations.md`. Set `pcmk-drbd-ubuntu` `MATRIX` entries in `src/mqlab/parity.py` for `dr-bootstrap`, `cutover`, `failback` to `SUPPORTED` and update `tests/test_parity.py` accordingly (the remaining verbs stay `NOT_YET` until Task 9).
+**Ledger.** Update the DR, replication and cluster rows of `docs/reference/rdqm-vs-vanilla-deviations.md`:
+
+- **RP-1:** `exact` for the two-resource shape (record the stacking deprecation in [UG] as the consequence).
+- **ST-4:** `exact` (stacked device mounted).
+- **RP-3:** settled by Drill 3b in Task 8.
+- **RP-5:** `partial` (logical peer named `dr-remote`, not `encrypted.remote`).
+- **CL-5:** `exact`.
+- **CL-10:** completed with the DR half.
+- **DR-1:** `exact`.
+- **DR-2:** `partial`. The DR clone `target-role` and marker flips are inferred; the mechanism is a playbook, not `rdqmdr`.
+- **TL-2:** `rdqmdr` → `site-pdrbd-dr-switch.yml`.
+
+**Parity.** Set `pcmk-drbd-ubuntu` `MATRIX` entries in `src/mqlab/parity.py` for `dr-bootstrap`, `cutover` and `failback` to `SUPPORTED`, and update `tests/test_parity.py` to match. The remaining verbs stay `NOT_YET` until Task 9.
 
 ```bash
-vrg-git add ansible/_pdrbd-dr-replication.yml ansible/site-pdrbd-dr-switch.yml ansible/tasks/rpo0-drill-*.yml ansible/vars/pdrbd-peers.yml tests/test_topology_pdrbd.py \
-  ansible/site-pdrbd.yml ansible/roles/pdrbd-qm tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py \
+vrg-git add ansible/_pdrbd-dr-replication.yml ansible/site-pdrbd-dr-switch.yml ansible/tasks/rpo0-drill-*.yml \
+  ansible/vars/pdrbd-peers.yml ansible/site-pdrbd.yml ansible/site-pdrbd-qm-down.yml ansible/roles/pdrbd-qm \
+  lab/topology.yaml tests/test_topology_pdrbd.py tests/test_pdrbd_dr_switch.py tests/test_pdrbd_qm_role.py \
   src/mqlab/parity.py tests/test_parity.py docs/reference/rdqm-vs-vanilla-deviations.md
-vrg-commit --type feat --scope pdrbd --message "DR: site B receiver + operator-driven cross-site switch with RPO-0 drill (#<T6>)"
+vrg-commit --type feat --scope pdrbd --message "DR: site B cluster, stacked DR resource, RDQM-style DR demote/promote with RPO-0 drill (#1428)"
 ```
+
+---
+
+### Task 6b: DRBD kernel TLS on both resources (lab #1609)
+
+Filed by the owner on 2026-10-17 as lab `logical-minds-foundry/mq-resiliency-lab-for-linux#1609`, blocked by Task 6 (#1428). Task 7's cold rebuild is blocked by it, so the one-pass acceptance covers the arm with TLS on. The fix list is in the issue body; this plan does not restate it. Steps follow this plan's shape:
+
+1. Failing structure tests.
+2. Bake, role and template changes:
+   - `ktls-utils` / `tlshd` in the `pdrbd` box.
+   - Per-node certificates from the lab CA.
+   - `net { tls yes; }` in **both** `qm.res.j2` and `qm.dr.res.j2`. In the DR template it goes in the `connection { net { … } }` block, where RDQM has it (`rdqm-a1/drbd-conf.txt`).
+3. `vrg-container-run -- vrg-validate`.
+4. Live proof on a cold-built stack that every HA and DR connection is encrypted. RDQM shows it as `tls:yes` per peer in `drbdadm status` (`rdqm-a1/drbd-status.txt`). A connection without TLS fails loud.
+5. The ledger: SC-1.
+
+The logical DR peer name (`dr-remote`, RP-5) is that task's to revisit if the certificate SAN needs it, as RDQM's `encrypted.remote` does.
 
 ---
 
 ### Task 7 (validation): Cold rebuild brings `pcmk-drbd-ubuntu` up in one pass
 
-Filed with `vrg-issue-create --kind validation`, blocked-by Task 6 (and Task 3's box). Not PR-workable; run with `issue-validate`.
+Filed with `vrg-issue-create --kind validation`. It is blocked by Task 6b (lab #1609), which is itself blocked by Task 6, and by Task 3's box. It is not PR-workable; run it with `issue-validate`.
 
-- **Precondition self-check:** Tasks 3–6 merged to `develop`; `mqlab box status` lists `pdrbd` as current (not stale) for the host arch.
+- **Precondition self-check:** Tasks 3–6 and 6b are merged to `develop`, and `mqlab box status` lists `pdrbd` as current (not stale) for the host arch.
 - **Procedure:**
   1. `mqlab teardown pcmk-drbd-ubuntu` (if anything is up), then a full cold rebuild per `docs/site` (destroy the guests and rebuild from the cached boxes).
   2. `mqlab bootstrap pcmk-drbd-ubuntu` — one invocation, no manual intervention.
   3. `mqlab qm status pcmk-drbd-ubuntu`; `mqlab qm e2e pcmk-drbd-ubuntu`.
   4. `mqlab bootstrap pcmk-drbd-ubuntu` again (idempotency, Review Focus 3).
   5. `mqlab dr cutover pcmk-drbd-ubuntu --rpo0-drill`; `mqlab dr failback pcmk-drbd-ubuntu --rpo0-drill`.
-- **Acceptance:** step 2 succeeds in one pass **and its transcript shows the watched DR-sync wait ending `in-sync after <n>s`** (record `n`); step 3 shows the promoted node, the group Started, all DRBD peers UpToDate, e2e green; step 4 reports no create-md/mkfs/crtmqm; step 5 succeeds both ways with the token found.
-- **Results template:** `Outcome: SUCCESS|FAILURE`, bootstrap transcript path, `qm status` output, e2e summary, the two dr outputs.
+- **Acceptance:**
+  - Step 2 succeeds in one pass, **and its transcript shows the watched DR-sync wait ending `in-sync after <n>s`**. Record `n`.
+  - Step 3 shows the blueprint's steady state on both sites (Task 6 Step 7 list), all DRBD peers UpToDate on both resources, TLS on every connection (#1609), and e2e green.
+  - Step 4 reports no create-md, stacked create-md, mkfs or crtmqm.
+  - Step 5 succeeds both ways with the token found.
+- **Results template:** `Outcome: SUCCESS|FAILURE`, the bootstrap transcript path, the `qm status` output, the e2e summary and the two dr outputs.
 
 ### Task 8 (validation): Drill set on `rdqm-rhel` and `pcmk-drbd-ubuntu`
 
-Filed with `--kind validation`, blocked-by Task 7. Arms run **one at a time** (bring one up, drill, record, tear down, then the other). For each arm, record per drill: the commands run, the observed end state (`mqlab qm status`), whether the QM ran on more than one node at any point (split-brain check: `drbdadm status` on all site nodes shows at most one Primary), and `mqlab qm e2e` before/after.
+Filed with `--kind validation`, blocked by Task 7. Arms run **one at a time**: bring one up, drill, record, tear down, then the other.
+
+For each arm, record per drill:
+
+- the commands run;
+- the observed end state (`mqlab qm status`);
+- whether the QM ran on more than one node at any point. The split-brain check is that `drbdsetup status --verbose` on all nodes of both sites shows at most one Primary per resource: the HA resource per site, and the DR resource across the sites. `drbdadm status all` omits the stacked DR resource (BP README §2.1);
+- `mqlab qm e2e` before and after.
+
+**Resource names.** Both arms now have two DRBD resources per QM:
+
+- RDQM: `rdqmapp` (HA) and `rdqmapp.dr` (DR).
+- pcmk-drbd: `pdrbdapp` and `pdrbdapp.dr`.
+
+The node that holds the DR resource is the site's HA primary.
 
 | # | Drill | Procedure (both arms) | Expected (both arms; differences are findings, not failures) |
 |---|---|---|---|
 | 1 | Controlled move | `mqlab qm e2e <stack>`; `mqlab qm down <stack>`; `mqlab qm up <stack>`; `mqlab qm e2e <stack>` | QM stops cleanly, restarts; e2e green before and after |
-| 2 | Hard kill of the active node | find the active node (`mqlab qm status`); `virsh destroy <its libvirt domain>` (resolve the domain name the way `lab/scripts/nativeha-fault-suite.sh` does); wait; `mqlab qm status`; `mqlab qm e2e`; restart the domain | QM restarts on a surviving node of the same site; no data loss (e2e green) |
+| 2 | Hard kill of the active node | find the active node (`mqlab qm status`); `virsh destroy <its libvirt domain>` (resolve the domain name the way `lab/scripts/nativeha-fault-suite.sh` does); wait; `mqlab qm status`; `mqlab qm e2e`; restart the domain | QM restarts on a surviving node of the same site, and the DR resource follows it to the new HA primary; no data loss (e2e green) |
 | 3 | HA network loss | `lab/scripts/net-down.sh net-hb-a`; observe 2 min; `mqlab qm status`; `lab/scripts/net-up.sh net-hb-a`; observe recovery | No node runs the QM without quorum; after restore one Primary, resync completes, e2e green |
-| 4 | Loss of 2 of 3 HA nodes | `virsh destroy` two site-A nodes including the active one; `mqlab qm status` on the survivor | The survivor does **not** run the QM (no quorum); restoring one node restores service |
-| 5 | DR cutover + failback | `mqlab dr cutover <stack> --rpo0-drill`; `mqlab qm e2e <stack>`; `mqlab dr failback <stack> --rpo0-drill`; `mqlab qm e2e <stack>` | Both succeed, token found both ways (RPO 0) |
-| 6 | Forced DR with degraded link | `lab/scripts/drbd-degrade.sh break <node> <res>` with the arm's **explicit** node and DRBD resource (RDQM: the site-A HA primary and the RDQM resource name from the blueprint; pcmk-drbd: the promoted site-A node and `pdrbdapp`) — never the script's SAN defaults; put a few messages; then forced promote at site B (RDQM: `rdqmdr -p -m <QM>` per IBM's forced procedure; pcmk-drbd: `ansible-playbook site-pdrbd-dr-switch.yml -e dr_direction=a2b -e qm_name=PDRBDAPP -e dr_force=true` after stopping site A); count messages lost | The forced promote succeeds only with the explicit force; the loss equals the post-break tail; without force the pcmk-drbd playbook refuses (Review Focus 4) |
+| 3b | **DR quorum on a WAN cut** (both arms; RP-3) | Start from a steady state with the DR pair UpToDate/UpToDate (`drbdsetup status --verbose <qm>.dr` on the site-A DR primary). Start a background `mqlab qm e2e <stack>` loop. Then run `lab/scripts/net-down.sh net-wan` and observe for 2 min. Each minute, record `drbdsetup status --verbose <qm>.dr` on the site-A DR primary (`quorum:`, `role:`, `disk:`), the QM state (`mqlab qm status`) and the e2e loop's result. Then `lab/scripts/net-up.sh net-wan`, wait for the DR resource to reconnect and resync to UpToDate, and run e2e. | **The question:** does the live DR primary keep DR quorum (`quorum:yes`), and does the QM keep serving e2e through the cut, with `quorum majority` / `on-no-quorum io-error` over 2 members? Record the answer per arm. If RDQM keeps serving and pcmk-drbd takes I/O errors, the difference is attributable to IBM's `disconnected` handler (TL-3) **(judgment, to be argued in Task 9)**. It becomes a ledger finding and an owner decision, not a silent config change. After restore: one DR Primary, UpToDate both sides, e2e green |
+| 4 | Loss of 2 of 3 HA nodes | `virsh destroy` two site-A nodes including the active one; `mqlab qm status` on the survivor | The survivor does **not** run the QM (no quorum: HA `quorum 2`); restoring one node restores service |
+| 5 | DR cutover + failback | Record `crm configure show` (RDQM) / `pcs config` (pcmk-drbd) on both sites before. Run `mqlab dr cutover <stack> --rpo0-drill`; `mqlab qm e2e <stack>`; record both sites' config again. Then `mqlab dr failback <stack> --rpo0-drill`; `mqlab qm e2e <stack>` | Both succeed, with the token found both ways (RPO 0). **RDQM:** the before/after diff shows what `rdqmdr -s`/`-p` actually change. It checks the inference behind Task 6's switch (only the DR clone's `target-role` and `<qm>-dr-role` flip). Any other change is a finding for the ledger (DR-2) |
+| 6 | Forced DR with degraded link | `lab/scripts/drbd-degrade.sh break <node> <res>` with the arm's **explicit** node and the **DR** resource (RDQM: the site-A HA primary and `rdqmapp.dr`; pcmk-drbd: the site-A DR primary and `pdrbdapp.dr`), never the script's SAN defaults. Put a few messages. Then stop site A (`virsh destroy` its three nodes) and force-promote at site B (RDQM: `rdqmdr -p -m <QM>` per IBM's forced procedure; pcmk-drbd: `ansible-playbook site-pdrbd-dr-switch.yml -e dr_direction=a2b -e qm_name=PDRBDAPP -e dr_force=true`). Count messages lost. Then restart site A and record what each arm's DR resource does on reconnect, with the exact recovery commands run | The forced promote succeeds only with the explicit force. The loss equals the post-break tail. Without force, the pcmk-drbd playbook refuses (Review Focus 4). If the pcmk-drbd promote is refused for lack of DR quorum (`quorum:no` in the playbook's failure output), that is the RP-3 finding; record it, do not work around it. On reconnect, `after-sb-*` is unset on both arms (RP-7): record the split-brain handling and the operator's recovery |
+| 7 | **`ocf:ibm:rdqmx` probe** (RDQM arm only; CL-7) | Read-only. `file /usr/lib/ocf/resource.d/ibm/rdqmx`. If it is a script, read it. `crm_resource --show-metadata ocf:ibm:rdqmx` (the metadata was empty per BP README §3.1). During drills 1 and 5, capture the Pacemaker log lines for `p_rdqmx_rdqmapp` start/stop (`journalctl -u pacemaker` filtered on `rdqmx`) and any files or processes they touch | A written description of what `rdqmx` does, with its evidence (Data), or an explicit "could not determine" (also Data). It feeds CL-7 in Task 9; the open-source arm has no counterpart either way (owner decision 5) |
 
-**Results template:** one table per arm with the six rows (Outcome, observed end state, split-brain check, e2e before/after, notes), plus `Outcome: SUCCESS` when every drill was executed and recorded on both arms (a behavioral difference between arms is a recorded finding, not a FAILURE; a drill that could not be executed is a FAILURE).
+Notes:
+
+- **Drill 6 pre-check.** `drbd-degrade.sh` runs plain `drbdadm disconnect <res>` with the resource named explicitly. [ocf] notes that drbd-utils ≥ 9.5.0 resolves an explicitly named stacked resource without `--stacked`. If `break` reports the stacked resource as unknown on either arm, fixing the script is a separate code task, filed before the drill runs. A drill that could not be executed is a FAILURE.
+- **Drill 3b and the network.** `net-wan` is the DR network on both arms (RP-5). The arms run one at a time, so the cut affects only the arm under test.
+
+**Results template:** one table per arm with the eight rows (1, 2, 3, 3b, 4, 5, 6, 7; drill 7 on RDQM only), each with Outcome, observed end state, split-brain check, e2e before/after and notes. Add `Outcome: SUCCESS` when every drill was executed and recorded on both arms. A behavioural difference between arms is a recorded finding, not a FAILURE; a drill that could not be executed is a FAILURE.
 
 ---
 

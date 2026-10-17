@@ -111,15 +111,21 @@ arm does the same thing with upstream parts; wherever it cannot, the deviation i
 ledgered (§6.2). The "expected" column below is the brainstorm's working hypothesis;
 **the blueprint capture (§6.1) is authoritative and overrides it.**
 
+**Reconciled (2026-10-17, `.github#362`).** The capture showed that RDQM builds HA and DR
+as **two separate DRBD resources**, not one resource spanning both sites. The owner adopted
+that design. The `pacemaker-drbd` column below now states it, and the plan's Tasks 5–6
+carry the blueprint values with citations. The evidence is the member repo's
+`docs/reference/rdqm-blueprint/` (README §2–§4) and ledger row RP-1.
+
 | Layer | RDQM (expected — capture confirms) | `pacemaker-drbd` |
 |---|---|---|
 | Nodes | 3 HA nodes at site A + 3 at site B, RHEL 9.6 x86-64 | `pdrbd-a1..3` + `pdrbd-b1..3`, Ubuntu 24.04 (host arch; arm64 on the dev host) |
-| Storage | `drbdpool` VG on a local extra disk; one LV per QM (plus a snapshot LV for DR) | Same VG convention on a per-node extra disk; one LV per QM (and the snapshot LV if the blueprint shows RDQM relies on it) |
-| Replication | DRBD 9 — synchronous within the site, asynchronous to the DR site | DRBD 9 (`drbd-dkms`), the protocols, peer layout, and quorum/split-brain options copied from the captured `.res` files |
-| Mount | `/var/mqm/vols/<qm>` containing `qmgr/` and `log/` data | Same layout, so MQ sees identical paths |
-| Cluster manager | Pacemaker/Corosync bundled by IBM; 3-node quorum plus DRBD quorum | Upstream Pacemaker/Corosync: promotable DRBD resource → `ocf:heartbeat:Filesystem` → MQ queue-manager resource → `ocf:heartbeat:IPaddr2` |
+| Storage | `drbdpool` VG on a local extra disk; one LV per QM, `<qm>_00` (plus a `-before-resync` snapshot LV for DR) | Same VG convention on a per-node extra disk; one LV per QM, `<qm>_00`. The snapshot LV is **not** built (owner decision, ledger DR-3 `none`) |
+| Replication | DRBD 9, as **two resources per QM**: a site-local HA resource `<qm>` (the site's 3 nodes, protocol C, `quorum 2`) and a DR resource `<qm>.dr` **stacked on top of it** (2 members: this site's HA primary and the other site as one logical peer over three `net-wan` paths, protocol A) | DRBD 9 (`drbd-dkms`), the same two resources with the options copied from the captured `.res` files |
+| Mount | `/var/mqm/vols/<qm>` containing `qmgr/` and `log/` data, mounted from the **stacked DR device** when DR is configured (the HA device for an HA-only QM) | Same layout and the same device choice, fixed when the QM is created, so MQ sees identical paths |
+| Cluster manager | Pacemaker/Corosync bundled by IBM, **one 3-node cluster per site**; HA promotable `ocf:linbit:drbd` clone → DR `ocf:linbit:drbd` clone (`clone-max=1`) → Filesystem → IBM `ocf:ibm:rdqmx` → IPaddr2 → IBM `ocf:ibm:rdqm` | Upstream Pacemaker/Corosync, one cluster per site: the same two `ocf:linbit:drbd` clones → `ocf:heartbeat:Filesystem` → `ocf:heartbeat:IPaddr2` → `systemd:mq-<QM>` (the IBM agents are ledgered deviations) |
 | Fencing | As captured (expected: DRBD quorum rather than STONITH) | The same choice; `pcmk-stonith` is reused only if RDQM uses fencing |
-| DR control | Operator-driven `rdqmdr` promote/demote | Operator-driven playbook performing the equivalent DRBD and Pacemaker steps; no Booth |
+| DR control | Operator-driven `rdqmdr` promote/demote | Operator-driven playbook that demotes the DR clone at the source site and promotes it at the target, leaving each site's HA layer running; no Booth |
 | Lifecycle tooling | `rdqmadm`, `crtmqm -sx`, `rdqmstatus`, `rdqmdr` | Playbooks behind the stack verbs; gaps are ledgered |
 
 ### 5.1 Where it lives (member repo)
@@ -136,8 +142,9 @@ ledgered (§6.2). The "expected" column below is the brainstorm's working hypoth
   box, so nodes never compile a kernel module at boot. Whether that is a new
   `pdrbd` box role or an addition to the existing `pcmk` box is a plan decision.
 - **Roles:** new `drbd9` (repo, DKMS module, module load, VG on the extra disk); new
-  `pdrbd-qm` (per-QM LV, DRBD resource, filesystem, Pacemaker resources, and the QM
-  create-and-hand-over sequence for a DRBD-backed volume). `pdrbd-qm` reuses the
+  `pdrbd-qm` (per-QM LV, the HA DRBD resource and, with DR, the stacked DR resource,
+  filesystem, Pacemaker resources, and the QM create-and-hand-over sequence for a
+  DRBD-backed volume). `pdrbd-qm` reuses the
   arm-neutral pieces — the `inter-qm.mqsc.j2` / `authz.mqsc.j2` templates,
   `mq-diag-logging`, `mq-event-monitor`, `pki-distribute` — and any template it
   shares is moved to a shared location with the old path kept working. Reused as-is:
@@ -154,7 +161,7 @@ ledgered (§6.2). The "expected" column below is the brainstorm's working hypoth
 |---|---|
 | `qm-create` / `qm-destroy` | Playbook: create or tear down the per-QM LV, DRBD resource, filesystem, and Pacemaker group |
 | `qm-up` / `qm-down` | `pcs resource enable` / `disable` on the QM's group (as `pcmk-ubuntu`) |
-| `qm-status` | `pcs status resources` plus `drbdadm status <res>` — the open-source counterpart of `rdqmstatus` |
+| `qm-status` | `pcs status resources` plus `drbdsetup status --verbose` (`drbdadm status all` omits the stacked DR resource) — the open-source counterpart of `rdqmstatus` |
 | `dr-cutover` / `dr-failback` | Playbook mirroring `rdqmdr -s` / `-p`: stop and demote at the active site, promote and start at the other. Operator-run, never automatic |
 | `diagnostics` | `runmqras`, as on the other arms |
 
