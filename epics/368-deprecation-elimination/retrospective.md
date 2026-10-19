@@ -40,7 +40,7 @@ We set out to do two things: remove every deprecation warning this repo owns, an
 | lab#1657 | 10-19 17:08 | lab#1644 (F2) | Dropped the redundant `\| bool` on `pdrbd_dr_formed` |
 | lab#1658 | 10-19 17:13 | lab#1646 (F4) | Pinned `mkdocs>=1.6,<2`; no lock churn (mkdocs stays 1.6.1) |
 | lab#1659 | 10-19 17:18 | lab#1649 (GAP) | Ansible dependency currency and management review (+491) |
-| vergil-actions#948 | 10-19 17:24 | vergil-actions#947 | `NO_MKDOCS_2_WARNING=1` in `ci-docs.yml` and the cd docs deploy action |
+| vergil-actions#948 | 10-19 17:24 | vergil-actions#947 | `NO_MKDOCS_2_WARNING=1` in `ci-docs.yml` and `cd-docs.yml` |
 | lab#1661 | 10-19 17:32 | lab#1645 (F3) | Dropped the deprecated `run-release` input and the dead `run-standards` wiring |
 | lab#1662 | 10-19 17:36 | lab#1648 (F5) | `release.yml` on `ubuntu-24.04`, with `checkout@v7` and `setup-python@v7` |
 | lab#1663 | 10-19 17:40 | lab#1654 | Dropped the no-op `container-suffix` from the `security` job |
