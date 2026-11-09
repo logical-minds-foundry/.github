@@ -89,13 +89,17 @@ works)
 - **`.github/workflows/ci.yml`:** the `version` job (`ci-version-bump`) is
   removed in two steps, so CI stays green throughout. While `release-model` is
   not `"none"`, vergil-tooling makes `version / version-bump` a required check
-  in develop's CI-gates ruleset, and `ops.yml` rebuilds that ruleset from the
-  profile only after a merge.
+  in develop's CI-gates ruleset. The ruleset changes only when
+  `vrg-github-repo-config apply` runs against the merged profile. `ops.yml`
+  only audits: it reports drift and changes nothing, and `apply` is a human
+  action run under the maintainer's own `gh` login.
   1. The profile PR changes `vergil.toml` and keeps the `version` job. Under
      `release-model = "none"`, the vergil-actions job passes as a no-op.
-  2. The human runs `ops.yml`, so the required check drops from the ruleset.
-  3. A follow-up PR removes the `version` job and the changelog-staging
-     comment.
+  2. Once that PR merges, the human runs `vrg-github-repo-config apply` from the
+     lab checkout, so the required check drops from the ruleset. The human then
+     runs `ops.yml` and confirms the audit reports no drift.
+  3. Only then, a follow-up PR removes the `version` job and the
+     changelog-staging comment.
 - **`pyproject.toml` docs group:** remove `mike`, which nothing calls once docs
   deploy with `mkdocs gh-deploy`, and re-lock.
 - **`.github/workflows/cd.yml`:** trigger on `develop` only.
@@ -149,8 +153,9 @@ version gate:
   protection only if it targets `main` alone. vergil-tooling's managed
   branch-protection and CI-gates rulesets each cover both `main` and `develop`,
   and they stay untouched: they keep protecting `develop`, and their `main`
-  include matches nothing once the branch is gone. Then run `ops.yml` once by
-  hand and confirm it reports no drift.
+  include matches nothing once the branch is gone. Then run `ops.yml` (the
+  audit) once by hand and confirm it reports no drift. If it does report
+  drift, run `vrg-github-repo-config apply` and audit again.
 - Delete the repo secrets `RELEASE_GPG_PRIVATE_KEY` and
   `RELEASE_GPG_PASSPHRASE`.
 - No tags or GitHub Releases exist, so there is nothing else to delete.
@@ -224,9 +229,15 @@ The full inventory is in the plan. In outline:
     §4.2.
   - `mq-resiliency-clients`: replace default values that name PCMK QMs or VIPs
     with retained values or required arguments.
-- **Tests:** delete the pcmk-, pdrbd-, drbd9- and san-only tests. Update every
-  fixture that seeds a removed stack, since `conftest.py` loads the real
-  `versions.yaml`.
+- **Tests:**
+  - Delete the pcmk-, pdrbd-, drbd9- and san-only tests.
+  - Update every fixture that seeds a removed stack, since `conftest.py` loads
+    the real `versions.yaml`.
+  - Repoint, never delete, the tests that guard retained behaviour through
+    `mq-pcmk-qmgr` paths: `test_mqmon_authz.py`, `test_mqweb_operator_authz.py`
+    and `test_channel_failover_qmini.py`. They read retained templates there,
+    including the `inter-qm.mqsc.j2` symlink. Point them at
+    `ansible/templates/mq/` and drop only their Pacemaker rows.
 - **Live docs:**
   - `README.md`: the canonical starting stack.
   - `docs/site/**`: delete diagram `05-pacemaker-san.html` and edit `02`.
@@ -242,7 +253,7 @@ The full inventory is in the plan. In outline:
 
 ### 4.2 Couplings to cut before deleting
 
-Three couplings tie retained stacks to Pacemaker code. Each must be moved before
+Four couplings tie retained stacks to Pacemaker code. Each must be cut before
 its source is deleted, in the same PR or an earlier one.
 
 1. **`mqoperator.mqsc.j2`** exists only in `roles/mq-pcmk-qmgr/templates/`. The
@@ -274,6 +285,11 @@ its source is deleted, in the same PR or an earlier one.
    - **The cockpit:** the arm becomes a required argument, and an unknown arm
      raises.
    - **`gather-versions.yml`:** targets `rdqm_a`.
+4. **`ansible/observability.yml`** lists `role: cluster-state` in a play that
+   runs on every host of every stack. Ansible resolves `roles:` entries when it
+   parses the playbook, whatever their `when:` says. So the entry, and the
+   `pcmk_a`/`pcmk_b` terms in `alloy_tail_mqweb`, are removed with or before the
+   `cluster-state` role.
 
 ### 4.3 Keep
 
@@ -307,10 +323,10 @@ Hosts that built the removed stacks are left with nothing behind:
   `pdrbd-ubuntu24/26` and `san-ubuntu24/26`) to `RETIRED_BOX_NAMES`, so
   `mqlab box gc` deregisters them from hosts that built them.
 - **Networks:** the libvirt networks `net-san-a` and `net-san-b` are destroyed
-  and undefined on hosts where they exist. `net-down.sh` only sees networks that
-  still have a `net-*.xml` file, so once the files are gone it cannot remove
-  them. The plan chooses the mechanism: a cleanup verb, or a documented one-time
-  command.
+  and undefined on hosts where they exist, as a documented one-time host step:
+  `lab/scripts/net-down.sh net-san-a net-san-b`. Given names, `net-down.sh` runs
+  `virsh net-destroy` and `net-undefine` on them whether or not their
+  `net-*.xml` files still exist. No new verb is built.
 
 ### 4.6 Purge Pacemaker-stack mentions from retained code
 
@@ -326,6 +342,11 @@ and default values such as `PCMKAPP` in the components.
 - Remove every special case in retained code that exists for a Pacemaker
   stack: a branch, a guard, a mechanism check or a fallback.
 - Replace default values that name a removed stack, QM or VIP (§4.2).
+- **Verification citations:** a comment that records where a retained setting
+  was verified on a removed stack is re-verified on a retained stack, then
+  rewritten to name that stack. The one live instance is `group_vars/all/tls.yml`
+  ("verified live on the pcmk-ubuntu arm: channels run TLS 1.3"). Its
+  re-verification is part of the §6 cold rebuild.
 - **The boundary:** Pacemaker, Corosync and DRBD as RDQM's own underlying
   technology are real and stay. Examples are `crm_mon` and `drbdsetup` in the
   RDQM collector, the `corosync`/`pacemaker`/`drbd` version probes, and RDQM's
@@ -353,20 +374,27 @@ Match on bodies as well as titles. Classify each item:
   include about 36 candidates. Examples:
   - the pdrbd defect and feature issues;
   - the pcmk W1/W4 and DR measurement validations;
-  - #909 (first signed release) and #1160 (download path);
-  - `pcmk-rhel` (#238, #118);
+  - `mq-resiliency-lab-for-linux#909` (first signed release) and
+    `mq-resiliency-lab-for-linux#1160` (download path);
+  - `pcmk-rhel`: `mq-resiliency-lab-for-linux#238` and `.github#118`;
   - the pacemaker-drbd arm epic `.github#310` and its open children.
 
-  #1432 ("pacemaker-san: retire, demote or extract") is closed as answered by
-  this epic.
-- **Rescope:** the item also covers retained stacks, for example #1627 (shared
-  roles), #1123 (the `SET AUTHREC` migration) and #288 (cross-stack bootstrap
-  parity). Edit the item to drop the removed scope, and comment with what
-  changed.
-- **Reframe:** the item was justified by a public release, for example `.github`
-  epics #161 (site docs for public release) and #351 (defect reporting batched
-  for the public release). Either rescope it to the develop-only lab or close
-  it, decided item by item.
+  `mq-resiliency-lab-for-linux#1432` ("pacemaker-san: retire, demote or
+  extract") is closed as answered by this epic.
+- **Rescope:** the item also covers retained stacks. Examples:
+  - `mq-resiliency-lab-for-linux#1627` (shared roles);
+  - `mq-resiliency-lab-for-linux#1123` (the `SET AUTHREC` migration);
+  - `.github#288` (cross-stack bootstrap parity).
+
+  Edit the item to drop the removed scope, and comment with what changed.
+- **Reframe:** the item was justified by a public release. Examples are
+  `.github#161` (site docs for public release) and `.github#351` (defect
+  reporting batched for the public release). Either rescope it to the
+  develop-only lab or close it, decided item by item.
+
+Every issue reference in the triage, and in the classification shown to the
+human, names its repository. The lab repo and `.github` reuse the same numbers
+for different issues.
 
 Open epics are closed the way their own framework requires. A finite epic whose
 remaining children are all closed as not planned is closed as not planned, with
@@ -377,17 +405,23 @@ Closes are outward-facing, so the human confirms each batch.
 
 ## 6. Ordering and acceptance
 
-- Track A: the profile change (§3.2 step 1), then the `ops.yml` run (step 2),
-  then the `version` job removal (step 3). The `main` deletion (§3.4) comes
-  after the profile change.
+- Track A: the profile change (§3.2 step 1), then the human's ruleset `apply`
+  and clean audit (step 2), then the `version` job removal (step 3). The `main`
+  deletion (§3.4) comes after the profile change.
 - Each §4.2 coupling is cut before or with the deletion it guards.
 - Track C closes items track by track. An item made moot by Track B is closed
   once Track B's removal has merged, without waiting on Track A's GitHub-side
   steps, and likewise for Track A. Each close cites the removal that made it
   moot.
-- **Acceptance:** `vrg-container-run -- vrg-validate` is green. A full cold
-  rebuild then brings up each of the three retained stacks in one pass, and
-  `qm-e2e` passes on each. That cold rebuild is a validation task.
+- **Track A acceptance** stands on its own and does not wait on Track B or the
+  cold rebuild:
+  - `vrg-container-run -- vrg-validate` is green;
+  - the `ops.yml` audit reports no drift;
+  - the docs site deploys from `develop` without versions.
+- **Track B acceptance:** `vrg-container-run -- vrg-validate` is green. A full
+  cold rebuild then brings up each of the three retained stacks in one pass,
+  and `qm-e2e` passes on each. That cold rebuild is a validation task, and it
+  also re-verifies TLS 1.3 on a retained stack (§4.6).
   - **Where it runs:** the RHEL stacks build only on the cloud x86 VMs, so the
     rebuild runs there. `nativeha-ubuntu` may run on either host.
   - **Baseline:** `rdqm-rhel` last passed a cold rebuild on 2026-10-14 (#1475,
@@ -395,7 +429,11 @@ Closes are outward-facing, so the human confirms each batch.
   - **Leftover-mention check:** a `vrg-git grep` for `pcmk`, `pdrbd`,
     `pacemaker-san`, `pacemaker-drbd`, `PCMK`, `PDRBD` and the SAN role names,
     excluding the historical paths and the RDQM-owned paths in §4.3, returns
-    nothing beyond the §4.6 boundary. Each remaining hit is listed with its
+    nothing beyond the §4.6 boundary, with one named exception: the PCMK panel
+    helpers kept in `clusterboard.py` for the dashboard rework (§4.1). Those
+    helpers are known to be PCMK-bound: `_PCMK_SEL`, and queries for the
+    `cluster_iscsi_sessions` and `cluster_fence_count` metrics, which nothing
+    emits once the collector is gone. Each remaining hit is listed with its
     reason in the validation comment.
 
 ## 7. Left to the builder
