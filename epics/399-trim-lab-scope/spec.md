@@ -86,9 +86,18 @@ works)
   vergil-tooling `lib/config.py` accepts these values. `docs-single-branch`
   integrates on `develop` and has no other eternal branch. Remove the
   `[markdownlint]` ignores for the changelog and release pages.
-- **`.github/workflows/ci.yml`:** remove the `version` job (`ci-version-bump`),
-  which compares against `origin/main`, and the changelog-staging comment. This
-  lands in the same PR as the `vergil.toml` change.
+- **`.github/workflows/ci.yml`:** the `version` job (`ci-version-bump`) is
+  removed in two steps, so CI stays green throughout. While `release-model` is
+  not `"none"`, vergil-tooling makes `version / version-bump` a required check
+  in develop's CI-gates ruleset, and `ops.yml` rebuilds that ruleset from the
+  profile only after a merge.
+  1. The profile PR changes `vergil.toml` and keeps the `version` job. Under
+     `release-model = "none"`, the vergil-actions job passes as a no-op.
+  2. The human runs `ops.yml`, so the required check drops from the ruleset.
+  3. A follow-up PR removes the `version` job and the changelog-staging
+     comment.
+- **`pyproject.toml` docs group:** remove `mike`, which nothing calls once docs
+  deploy with `mkdocs gh-deploy`, and re-lock.
 - **`.github/workflows/cd.yml`:** trigger on `develop` only.
 - **`docs/site/mkdocs.yml`:** remove the `mike` version provider and the
   Releases nav section. Docs then deploy with `mkdocs gh-deploy --force`, which
@@ -136,9 +145,12 @@ worktree, not the `main` branch.
 Once the profile change has merged and CI is green on `develop` without the
 version gate:
 
-- Delete the `main` branch on GitHub, and any ruleset or branch protection that
-  targets it. `ops.yml` reconciles GitHub configuration from the profile daily;
-  run it once by hand to confirm it no longer expects `main`.
+- Delete the `main` branch on GitHub. Delete a ruleset or classic branch
+  protection only if it targets `main` alone. vergil-tooling's managed
+  branch-protection and CI-gates rulesets each cover both `main` and `develop`,
+  and they stay untouched: they keep protecting `develop`, and their `main`
+  include matches nothing once the branch is gone. Then run `ops.yml` once by
+  hand and confirm it reports no drift.
 - Delete the repo secrets `RELEASE_GPG_PRIVATE_KEY` and
   `RELEASE_GPG_PASSPHRASE`.
 - No tags or GitHub Releases exist, so there is nothing else to delete.
@@ -155,6 +167,11 @@ ops-github-config ruleset reconciliation all behave correctly with it. If
 vergil-tooling cannot express a develop-only code repo, stop and raise it with
 the human; that becomes a vergil-tooling issue, not a lab workaround.
 
+One gap is known and accepted. The managed rulesets are not aware of the
+branching model: vergil-tooling always includes `refs/heads/main` and
+`refs/heads/develop`. After `main` is deleted, that `main` include is a
+harmless no-op. This epic does not wait on vergil-tooling to change it.
+
 ## 4. Track B — three stacks
 
 ### 4.1 Remove
@@ -164,7 +181,9 @@ The full inventory is in the plan. In outline:
 - **Topology and catalog:**
   - `stacks.pcmk-ubuntu` and `stacks.pcmk-drbd-ubuntu`.
   - Nodes `pcmk-*`, `pdrbd-*`, `san-a` and `san-b`, and their groups.
-  - Networks `net-san-a` and `net-san-b`.
+  - Networks `net-san-a` and `net-san-b`: their definitions,
+    `lab/networks/net-san-a.xml` and `net-san-b.xml`. No retained stack uses
+    SAN storage.
   - The `pcmk`, `pdrbd` and `san` roles and stack entries in
     `lab/versions.yaml`.
   - `"san"` in `versions.py` `INFRA_ROLES`, in the same commit as the catalog
@@ -179,10 +198,18 @@ The full inventory is in the plan. In outline:
     `iscsi-initiator`, `pdrbd-qm`, `pdrbd-replication-tls`, `cluster-state` and
     `mq-pcmk-qmgr`. Remove `mq-pcmk-qmgr` only after the move in §4.2.
 - **`lab/` scripts:** `pcmk-dr-*.sh`, `pcmk-qm-create.sh`, `drbd-degrade.sh`
-  and `dr-provision.sh`.
+  and `dr-provision.sh`. `mqlab vm provision-env` stays as a general operator
+  verb that works for any stack. Reword its docstring and the `lab/secret-names`
+  comment so they no longer cite `dr-provision.sh`.
 - **Python:**
   - Drop the `parity.py` rows and the `stacks.py` `_MECH_LABEL` entries.
-  - In `clusterboard.py`, remove the PCMK board; the generic helpers stay.
+  - In `clusterboard.py`, remove the PCMK board itself: its branch in
+    `render_cluster_dashboard` and its `_ARM_NAMES` and `_ARM_KIND` entries.
+    The panel helpers that only it used (`hero_tiles`, `integrity_panel`,
+    `timeline_band`, `_COMPUTE_COLS`, `_STORAGE_COLS`) stay, with their tests,
+    as building blocks for the planned dashboard rework. That is a deliberate
+    exception to the dead-code anti-goal. The helpers the RDQM and Native HA
+    boards share stay as well.
   - In `dashboard.py`, remove the PCMK rows, the PCMK cockpit link and the
     net-san planes. Re-default the hardwired `QMS` to `NHAUAPP` and its
     `SVCQM` channels (§4.2).
@@ -206,8 +233,10 @@ The full inventory is in the plan. In outline:
   - `docs/development/box-bake-manifest.md`, `box-model.md` and
     `perf-and-staging.md`.
   - `docs/reference/`:
-    - Delete `drbd-operations.md` and `rdqm-vs-vanilla-deviations.md`, both of
-      which describe only removed stacks; git history keeps them.
+    - Delete `drbd-operations.md` and `rdqm-vs-vanilla-deviations.md`; git
+      history keeps them. The RDQM-versus-pacemaker-drbd ledger is not kept in
+      any reduced form. Reword `rdqm-blueprint/README.md` so it no longer
+      points to a row-by-row reading.
     - Edit the other references to the removed stacks.
   - The component READMEs.
 
@@ -226,17 +255,25 @@ its source is deleted, in the same PR or an earlier one.
    Move `parse_drbd` and its tests into the RDQM collector, or into a shared
    module, before `clusterstate.py` goes.
 3. **Defaults that name PCMK.** These need replacements:
-   - `roles/mq-exporter` defaults to `PCMKAPP`;
+   - `roles/mq-exporter` defaults `mq_exporter_qm` (`PCMKAPP`),
+     `mq_exporter_conn` (the `pcmk-ubuntu` VIP) and `mq_exporter_port` (the
+     `pcmk-ubuntu` port);
    - `dashboard.py` `QMS` hardcodes the `PCMKAPP` channels;
    - `render_cluster_dashboard` defaults to `arm="pcmk-ubuntu"`;
    - `gather-versions.yml` targets `pcmk_a:rdqm_a`.
 
-   Where a QM default must exist, it is `NHAUAPP`, the `nativeha-ubuntu` QM.
-   That applies to the `mq-exporter` default and to `dashboard.py` `QMS` and its
-   channels. The dashboard is re-defaulted, not redesigned; replacing the
-   hardwired QM belongs to the later dashboard rework. The cockpit arm becomes a
-   required argument, and an unknown arm raises. `gather-versions.yml` targets
-   `rdqm_a`.
+   The replacements:
+   - **`mq-exporter`:** all three values become required, with no defaults, so
+     the role fails loud when a caller omits one. Its caller, `site-obs.yml`,
+     already passes all three per stack. If the exporter build tasks
+     (`bake-mq-ubuntu.yml`, `tasks_from: build`) read any of them, the bake
+     passes it explicitly.
+   - **`dashboard.py`:** `QMS` and its channels default to `NHAUAPP`, the
+     `nativeha-ubuntu` QM. The dashboard is re-defaulted, not redesigned;
+     replacing the hardwired QM belongs to the later dashboard rework.
+   - **The cockpit:** the arm becomes a required argument, and an unknown arm
+     raises.
+   - **`gather-versions.yml`:** targets `rdqm_a`.
 
 ### 4.3 Keep
 
@@ -258,14 +295,22 @@ its source is deleted, in the same PR or an earlier one.
   `nativeha-ubuntu`, the only retained stack that needs no RHEL subscription and
   no RDQM entitlement.
 - **CLI help examples** name a retained stack.
-- **`parity.py`** no longer describes a "reference backend". It declares each
-  retained stack's capability.
+- **`parity.py`** no longer describes a "reference backend". Its retained rows
+  are kept as they are, including `rdqm-rhel`'s `NOT_YET` row, which is out of
+  scope (§2). Only the comment is reworded.
 
 ### 4.5 Host cleanup
 
-Add the orphaned box names (`pcmk-ubuntu24/26`, `pdrbd-ubuntu24/26` and
-`san-ubuntu24/26`) to `RETIRED_BOX_NAMES`, so `mqlab box gc` deregisters them
-from hosts that built them.
+Hosts that built the removed stacks are left with nothing behind:
+
+- **Boxes:** add the orphaned box names (`pcmk-ubuntu24/26`,
+  `pdrbd-ubuntu24/26` and `san-ubuntu24/26`) to `RETIRED_BOX_NAMES`, so
+  `mqlab box gc` deregisters them from hosts that built them.
+- **Networks:** the libvirt networks `net-san-a` and `net-san-b` are destroyed
+  and undefined on hosts where they exist. `net-down.sh` only sees networks that
+  still have a `net-*.xml` file, so once the files are gone it cannot remove
+  them. The plan chooses the mechanism: a cleanup verb, or a documented one-time
+  command.
 
 ### 4.6 Purge Pacemaker-stack mentions from retained code
 
@@ -332,10 +377,14 @@ Closes are outward-facing, so the human confirms each batch.
 
 ## 6. Ordering and acceptance
 
-- Track A's profile change (§3.2) lands before the `main` deletion (§3.4).
+- Track A: the profile change (§3.2 step 1), then the `ops.yml` run (step 2),
+  then the `version` job removal (step 3). The `main` deletion (§3.4) comes
+  after the profile change.
 - Each §4.2 coupling is cut before or with the deletion it guards.
-- Track C runs after Tracks A and B have merged, so each close can cite the
-  removal that made it moot.
+- Track C closes items track by track. An item made moot by Track B is closed
+  once Track B's removal has merged, without waiting on Track A's GitHub-side
+  steps, and likewise for Track A. Each close cites the removal that made it
+  moot.
 - **Acceptance:** `vrg-container-run -- vrg-validate` is green. A full cold
   rebuild then brings up each of the three retained stacks in one pass, and
   `qm-e2e` passes on each. That cold rebuild is a validation task.
