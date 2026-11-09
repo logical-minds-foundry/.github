@@ -1,6 +1,6 @@
 # Epic 399 — Trim the lab to develop-only and three stacks
 
-**Status:** spec · **Epic:** logical-minds-foundry/.github#399 ·
+**Status:** draft, in design review · **Epic:** logical-minds-foundry/.github#399 ·
 **Repo:** logical-minds-foundry/mq-resiliency-lab-for-linux ·
 **Planning issue:** logical-minds-foundry/.github#398 (review history is in its
 comments)
@@ -189,7 +189,7 @@ The full inventory is in the plan. In outline:
   - In `watcherboard.py`, remove the Pacemaker branch.
   - In `cli.py`, remove the `pcs` verb kind.
   - Remove `QmConfig.vip_ext` and its `cli.py` and `dns.py` plumbing.
-  - Remove `mqlab qm destroy`, which no retained stack implements (my call).
+  - Remove `mqlab qm destroy`, which no retained stack implements.
   - Remove the `refuse` verb shape if no retained stack declares it.
 - **Components:**
   - `mq-resiliency-observability`: remove `mqro/clusterstate.py`, its
@@ -207,7 +207,7 @@ The full inventory is in the plan. In outline:
     `perf-and-staging.md`.
   - `docs/reference/`:
     - Delete `drbd-operations.md` and `rdqm-vs-vanilla-deviations.md`, both of
-      which describe only removed stacks (my call; git keeps them).
+      which describe only removed stacks; git history keeps them.
     - Edit the other references to the removed stacks.
   - The component READMEs.
 
@@ -256,7 +256,7 @@ its source is deleted, in the same PR or an earlier one.
 
 - **Canonical starting stack in the README and getting-started:**
   `nativeha-ubuntu`, the only retained stack that needs no RHEL subscription and
-  no RDQM entitlement (my call).
+  no RDQM entitlement.
 - **CLI help examples** name a retained stack.
 - **`parity.py`** no longer describes a "reference backend". It declares each
   retained stack's capability.
