@@ -94,9 +94,9 @@ task.
 | 6b | Remove Pacemaker-only CLI and model features; retire box names | lab | impl | 6a |
 | 6c | Remove Pacemaker Ansible, lab scripts and SAN networks | lab | impl | 5a, 6a |
 | 6d | Remove the PCMK collector and component defaults | lab | impl | 5b, 6c |
-| 7a | Purge Pacemaker-stack mentions: Ansible and `lab/` | lab | impl | 6c |
-| 7b | Purge Pacemaker-stack mentions: `src/mqlab` and `tests/` | lab | impl | 6a, 6b |
-| 7c | Track B live docs | lab | impl | 3, 6c, 6d |
+| 7a | Purge Pacemaker-stack mentions: Ansible and `lab/` | lab | impl | 5b, 6c |
+| 7b | Purge Pacemaker-stack mentions: `src/mqlab` and `tests/` | lab | impl | 6a, 6b, 6c, 6d, 7a |
+| 7c | Track B live docs | lab | impl | 3, 6c, 6d, 7a |
 | 8 | Host cleanup on lab hosts | lab | deployment (human-run) | 6b, 6c |
 | 9 | Cold rebuild of the three retained stacks | lab | validation | 6d, 7a, 7b, 8 |
 | 10a | Triage: release-scope open work | lab | triage (human-confirmed) | 3 |
@@ -203,6 +203,8 @@ the maintainer's own GitHub login.
   - `VERSION`, `CHANGELOG.md` and `releases/`
   - `docs/development/release-runbook.md`
 - Modify:
+  - `docs/site/mkdocs.yml`: the Releases `nav` section (about lines 58-62),
+    whose targets this task deletes. Otherwise `mkdocs build --strict` fails.
   - `vergil.toml`: the `[markdownlint]` ignores and their comment.
   - `.gitignore`: the changelog and releases lines, unless they sit in the
     vergil-managed block.
@@ -237,8 +239,8 @@ the maintainer's own GitHub login.
     checkout of `develop`, and its branching line names `docs-single-branch`.
   - **`paths.py`:** the docstring says `MQLAB_REPO_ROOT` is a test hook for
     pointing the repo at a temporary tree. The behaviour is unchanged.
-- [ ] **Step 4: Validate.** Expected: green. The kept `version` job passes as a
-  no-op.
+- [ ] **Step 4: Validate.** Expected: green, including the strict docs build.
+  The kept `version` job passes as a no-op.
 - [ ] **Step 5: Commit and hand off.** Run
   `vrg-commit --type chore --scope release --message "remove the release tarball machinery"`.
   The human pushes, because the delta touches `.github/workflows/`.
@@ -286,9 +288,9 @@ the maintainer's own GitHub login.
 
 **Interfaces:**
 
-- Produces: `ansible/templates/mq/{authz,inter-qm,mqoperator}.mqsc.j2` are the
-  only copies retained code reads. Task 6c deletes `roles/mq-pcmk-qmgr/`
-  outright.
+- Produces: `ansible/templates/mq/{authz,mqoperator}.mqsc.j2` are the only
+  copies retained code reads. Task 6c deletes `roles/mq-pcmk-qmgr/` and
+  `ansible/templates/mq/inter-qm.mqsc.j2` outright.
 
 - [ ] **Step 1: Write the failing tests** in
   `tests/test_retained_mqsc_templates.py`:
@@ -304,9 +306,9 @@ the maintainer's own GitHub login.
   - Move the template.
   - Repoint the four readers, and repoint the two `authz.mqsc.j2` readers to
     `ansible/templates/mq/authz.mqsc.j2`.
-  - In the three tests, point the template paths at `ansible/templates/mq/`
-    and drop the rows that cover `roles/mq-pcmk-qmgr/tasks/main.yml` and the
-    `inter-qm.mqsc.j2` symlink.
+  - In the three tests, point the `authz` and `mqoperator` template paths at
+    `ansible/templates/mq/`. The `test_channel_failover_qmini.py` row for the
+    `inter-qm.mqsc.j2` symlink stays; Task 6c removes it with the role.
   - Leave `roles/mq-pcmk-qmgr` and its symlinks in place, for Task 6c to
     delete.
 - [ ] **Step 4: Validate.** Expected: green.
@@ -322,6 +324,8 @@ the maintainer's own GitHub login.
     import; define `parse_drbd` here)
   - `components/mq-resiliency-observability/src/mqro/clusterstate.py` (import
     `parse_drbd` from `mqro.rdqmstate`, until Task 6d deletes the file)
+  - `ansible/roles/rdqm-state/tasks/main.yml:5`: the comment cites
+    `clusterstate.parse_drbd`; it becomes `mqro.rdqmstate.parse_drbd`.
 - Move tests: the `parse_drbd` cases from `tests/test_clusterstate.py` to
   `tests/test_rdqmstate.py`, with the `drbd_status.txt` fixture copied
   alongside the RDQM fixtures.
@@ -351,6 +355,13 @@ This is one PR on purpose. `versions.load_catalog` requires every
 `DashboardError` on an unknown group, so the catalog, the topology and their
 Python consumers must change together.
 
+**Precondition (human-attested, before this PR merges):** on each host that has
+built the lab (the macOS Lima VM and the cloud x86 VM), run
+`uv run mqlab teardown pcmk-ubuntu` and `uv run mqlab teardown pcmk-drbd-ubuntu`
+while the code still knows those stacks. After this task, `mqlab` refuses them
+and any guest still defined is an orphan. Record the attestation in the PR
+notes.
+
 **Files:**
 
 - Modify:
@@ -378,6 +389,9 @@ Python consumers must change together.
       `_ARM_KIND`.
     - Keep `hero_tiles`, `integrity_panel`, `timeline_band`, `_COMPUTE_COLS`,
       `_STORAGE_COLS` and `_PCMK_SEL`, with their tests.
+    - Delete the PCMK-only `log_row`, `perf_section`, `net_section`,
+      `_CLUSTER_GROUPS` and `_CLUSTER_PLANES`, with their tests. If one turns
+      out to have a retained caller, keep it and record why in the PR notes.
   - Every caller of `render_cluster_dashboard` passes the arm.
   - `src/mqlab/dashboard.py`:
     - Drop the `PCMK · A` and `PCMK · B` `ROWS` entries, the `net-san-a/b`
@@ -490,6 +504,8 @@ Python consumers must change together.
   - `pcmk-dr-cutover.sh`, `pcmk-dr-force.sh`, `pcmk-dr-seed-peer.sh`,
     `pcmk-qm-create.sh`, `drbd-degrade.sh` and `dr-provision.sh`;
   - `lab/networks/net-san-a.xml` and `net-san-b.xml`.
+- Delete `ansible/templates/mq/inter-qm.mqsc.j2`: only `mq-pcmk-qmgr` (through
+  its symlink) and `pdrbd-qm` read it.
 - Modify:
   - `ansible/observability.yml`: drop the `cluster-state` role entry and the
     `pcmk_a`/`pcmk_b` terms in `alloy_tail_mqweb` (coupling 4).
@@ -498,9 +514,11 @@ Python consumers must change together.
   - `ansible/roles/mq-exporter/defaults/main.yml`: remove the
     `mq_exporter_qm`, `mq_exporter_conn` and `mq_exporter_port` defaults.
     `mq_exporter_instance` stays derived from `mq_exporter_qm`.
-  - `ansible/roles/mq-exporter/tasks/main.yml`: as its first task, an
+  - `ansible/roles/mq-exporter/tasks/instance.yml`: as its first task, an
     `ansible.builtin.assert` that the three variables are defined, with
-    `fail_msg` naming the missing one.
+    `fail_msg` naming the missing one. It goes in `instance.yml`, the only
+    file that reads them, so `build.yml` (which `site-obs.yml` runs alone) is
+    not gated.
   - `src/mqlab/cli.py:1883-1887` and `lab/secret-names`: reword the comment
     and docstring for `provision-env`.
 - Delete tests:
@@ -514,7 +532,16 @@ Python consumers must change together.
   - `test_textfile_dropzone.py:34`;
   - `test_ansible_os_vars.py:52,55`;
   - `test_version_token_guardrail.py:208`;
-  - `test_event_monitor_dr_nodes.py`.
+  - `test_event_monitor_dr_nodes.py`;
+  - `test_channel_failover_qmini.py:125,128`: drop the
+    `roles/mq-pcmk-qmgr/templates/inter-qm.mqsc.j2` row, and set the expected
+    line count to the retained sites;
+  - `test_acl_baked.py`, `test_client_roles_rewired.py` and
+    `test_stage_off_tmpfs.py`, which read files this task deletes;
+  - `test_mqweb_operator_authz.py:173`: drop the `pdrbd-qm` row.
+- Any other test this removal breaks: update it until `vrg-validate` is green.
+  Delete a test only when its whole subject is gone; never delete one that
+  covers retained behaviour.
 - Test: `tests/test_ansible_retained_only.py` (new)
 
 **Interfaces:**
@@ -526,8 +553,9 @@ Python consumers must change together.
   - `test_observability_roles_all_exist` (Review Focus 2): every `role:` named
     in `ansible/observability.yml` exists under `ansible/roles/`.
   - `test_mq_exporter_requires_qm_conn_port` (Review Focus 3): the defaults
-    file defines none of the three variables, and the role's first task is an
-    `assert` whose `that` covers all three.
+    file defines none of the three variables, the first task of
+    `tasks/instance.yml` is an `assert` whose `that` covers all three, and
+    `tasks/build.yml` has no such assert.
   - `test_no_removed_playbooks_or_roles`: none of the deleted paths exists.
   - `test_no_san_networks`: no `lab/networks/net-san-*.xml` exists.
   - `test_site_obs_passes_exporter_values`: every exporter item in
@@ -561,9 +589,16 @@ Python consumers must change together.
     - `dr_forced.py` (line 62): `"pcmk-dr"`.
     - `reconnect_probe.py`.
 
-    Where the systemd units always pass a value, the argument becomes required.
-    Elsewhere the default is `NHAUAPP`. A VIP default is removed outright,
-    because `nativeha-ubuntu` has none.
+    Each default is set by its role:
+    - an application-side QM default becomes `NHAUAPP`;
+    - a service-side `--qm` default becomes `SVCQM`, or the argument becomes
+      required if no retained stack provides one;
+    - a VIP default is removed, because no retained stack has a Pacemaker VIP,
+      and the argument becomes required where it is still used;
+    - `dr_forced`'s `"pcmk-dr"` label becomes a neutral label that names no
+      stack;
+    - where the systemd units always pass a value, the argument becomes
+      required.
   - Purge the components' Pacemaker-stack mentions, in their code and READMEs
     (spec §4.6), so the rebake happens once.
 - Modify tests: `test_dlq_probe`, `test_authz_probe` and
@@ -574,6 +609,10 @@ Python consumers must change together.
     `[project.scripts]` has no `lab-cluster-state`.
   - `test_clients_have_no_pcmk_defaults`: a text scan of `mqrc/*.py` finds no
     `PCMK`, `pcmk-` or `PDRBD`.
+  - One test per changed default: the application-side default is `NHAUAPP`,
+    the service-side default is `SVCQM` (or the argument is required), each
+    removed VIP default leaves the argument required, and the `dr_forced`
+    label names no stack.
 - [ ] **Step 2: Run** `vrg-container-run -- vrg-validate`. Expected: FAIL.
 - [ ] **Step 3: Implement** the changes above.
 - [ ] **Step 4: Validate.** Expected: green.
@@ -583,8 +622,8 @@ Python consumers must change together.
 ### Task 7a: Purge Pacemaker-stack mentions: Ansible and `lab/`
 
 **Files:** every live file under `ansible/` and `lab/` that `vrg-git grep -nE`
-matches for `pcmk|pdrbd|pacemaker-san|pacemaker-drbd|PCMK|PDRBD`, outside the
-§4.6 boundary. The known ones:
+matches for `pcmk|pdrbd|pacemaker-san|pacemaker-drbd|PCMK|PDRBD|clusterstate`,
+outside the §4.6 boundary. The known ones:
 
 - `site-rdqm.yml`, `site-nativeha*.yml`, `site-distributed-shared.yml` and
   `_rdqm-cluster-ha.yml`;
@@ -647,7 +686,12 @@ matches for `pcmk|pdrbd|pacemaker-san|pacemaker-drbd|PCMK|PDRBD`, outside the
     - the kept `clusterboard.py` panel helpers, `_PCMK_SEL` and the
       `cluster_iscsi_sessions` / `cluster_fence_count` queries (spec §4.1 and
       §6), each with its reason;
-    - `tests/test_no_pcmk_mentions.py` itself.
+    - `tests/test_clusterboard.py`, which tests the kept panel helpers;
+    - the guard tests, which name removed paths or stacks to assert they are
+      gone: `tests/test_no_pcmk_mentions.py` itself,
+      `tests/test_three_stacks.py`, `tests/test_ansible_retained_only.py`,
+      `tests/test_retained_mqsc_templates.py` and
+      `tests/test_retired_boxes.py`.
 - [ ] **Step 2: Run** `vrg-container-run -- vrg-validate`. Expected: FAIL.
 - [ ] **Step 3: Rewrite the hits.** Help examples name `nativeha-ubuntu`.
 - [ ] **Step 4: Validate.** Expected: green.
@@ -707,6 +751,9 @@ the lab: the macOS Lima VM and the cloud x86 VM.
 
 - [ ] **Precondition:** Tasks 6b and 6c are merged, and the host's checkout is
   on `develop` at or after both.
+- [ ] **Step 0:** Run `virsh list --all`. Expected: no guest of a removed stack
+  (`pcmk-*`, `pdrbd-*`, `san-*`). If one is listed, the Task 6a teardown
+  precondition was missed; stop and report it, rather than removing it here.
 - [ ] **Step 1:** Run `lab/scripts/net-down.sh net-san-a net-san-b`. Expected:
   each network is destroyed and undefined, or reported absent.
 - [ ] **Step 2:** Run `uv run mqlab box gc`. Expected: the six retired box names
@@ -732,10 +779,12 @@ Create it with `vrg-issue-create --kind validation`; it is blocked by Tasks
   TLS 1.3 (`DISPLAY CHSTATUS(*) SSLCIPH`, or the lab's TLS verify play).
   Expected: a TLS 1.3 cipher. This backs the Task 7a comment.
 - [ ] **Step 4:** run the spec §6 leftover-mention grep,
-  `vrg-git grep -nE 'pcmk|pdrbd|pacemaker-san|pacemaker-drbd|PCMK|PDRBD|iscsi|drbd-san'`,
+  `vrg-git grep -nE 'pcmk|pdrbd|pacemaker-san|pacemaker-drbd|PCMK|PDRBD|iscsi|drbd-san|clusterstate'`,
   excluding the historical paths and the §4.3 RDQM paths. Expected: only the
   `ALLOW` entries from Tasks 7a and 7b, each listed with its reason in the
-  result comment.
+  result comment: the clusterboard panel helpers and their queries,
+  `tests/test_clusterboard.py`, `src/mqlab/retired_boxes.py`, and the guard
+  tests named in Task 7b.
 - [ ] **Result:** `Outcome: SUCCESS` with the run-log paths for each stack, or
   `FAILURE`. On failure the task stays open.
 
