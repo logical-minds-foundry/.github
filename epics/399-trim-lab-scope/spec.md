@@ -1,6 +1,6 @@
 # Epic 399 — Trim the lab to develop-only and three stacks
 
-**Status:** draft, in design review · **Epic:** logical-minds-foundry/.github#399 ·
+**Status:** approved · **Epic:** logical-minds-foundry/.github#399 ·
 **Repo:** logical-minds-foundry/mq-resiliency-lab-for-linux ·
 **Planning issue:** logical-minds-foundry/.github#398 (review history is in its
 comments)

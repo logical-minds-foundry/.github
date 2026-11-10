@@ -1,6 +1,6 @@
 # Trim the lab to develop-only and three stacks: implementation plan
 
-**Status:** draft, in design review · **Epic:** logical-minds-foundry/.github#399 ·
+**Status:** approved · **Epic:** logical-minds-foundry/.github#399 ·
 **Planning issue:** logical-minds-foundry/.github#398 (review history is in its
 comments)
 
