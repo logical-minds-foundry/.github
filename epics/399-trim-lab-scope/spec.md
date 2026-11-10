@@ -51,6 +51,10 @@ stacks.
 - Any behaviour change to the three retained stacks.
 - Closing the operator-verb gap on `rdqm-rhel`, which `parity.py` declares
   `NOT_YET`.
+- Guarding the removal. This is a cleanup of a lab, not a migration of a
+  production system. No test is added to prove that something removed stays
+  removed; if it ever comes back, that is a decision. Checks that the removal
+  is complete run once, during the work, and are not kept.
 - Redesigning the dashboards. They are a work in progress with a planned
   rework of their own, which covers the hardwired QM panel among other things.
   This epic only removes the parts specific to the removed stacks. It does not
@@ -214,7 +218,9 @@ The full inventory is in the plan. In outline:
     `timeline_band`, `_COMPUTE_COLS`, `_STORAGE_COLS`) stay, with their tests,
     as building blocks for the planned dashboard rework. That is a deliberate
     exception to the dead-code anti-goal. The helpers the RDQM and Native HA
-    boards share stay as well.
+    boards share stay as well. The board's other PCMK-only helpers
+    (`log_row`, `perf_section`, `net_section`, `_CLUSTER_GROUPS`,
+    `_CLUSTER_PLANES`) go.
   - In `dashboard.py`, remove the PCMK rows, the PCMK cockpit link and the
     net-san planes. Re-default the hardwired `QMS` to `NHAUAPP` and its
     `SVCQM` channels (§4.2).
@@ -233,11 +239,12 @@ The full inventory is in the plan. In outline:
   - Delete the pcmk-, pdrbd-, drbd9- and san-only tests.
   - Update every fixture that seeds a removed stack, since `conftest.py` loads
     the real `versions.yaml`.
-  - Repoint, never delete, the tests that guard retained behaviour through
+  - Repoint, never delete, the tests that cover retained behaviour through
     `mq-pcmk-qmgr` paths: `test_mqmon_authz.py`, `test_mqweb_operator_authz.py`
-    and `test_channel_failover_qmini.py`. They read retained templates there,
-    including the `inter-qm.mqsc.j2` symlink. Point them at
-    `ansible/templates/mq/` and drop only their Pacemaker rows.
+    and `test_channel_failover_qmini.py`. Point their `authz` and `mqoperator`
+    rows at `ansible/templates/mq/` and drop their Pacemaker rows.
+- **`ansible/templates/mq/inter-qm.mqsc.j2`:** only `mq-pcmk-qmgr` and
+  `pdrbd-qm` read it, so it goes with them.
 - **Live docs:**
   - `README.md`: the canonical starting stack.
   - `docs/site/**`: delete diagram `05-pacemaker-san.html` and edit `02`.
@@ -319,6 +326,9 @@ its source is deleted, in the same PR or an earlier one.
 
 Hosts that built the removed stacks are left with nothing behind:
 
+- **Guests:** before the stack model drops the two stacks, the human runs
+  `uv run mqlab teardown` for each of them on each host, while `mqlab` still
+  knows them.
 - **Boxes:** add the orphaned box names (`pcmk-ubuntu24/26`,
   `pdrbd-ubuntu24/26` and `san-ubuntu24/26`) to `RETIRED_BOX_NAMES`, so
   `mqlab box gc` deregisters them from hosts that built them.
@@ -396,9 +406,8 @@ Every issue reference in the triage, and in the classification shown to the
 human, names its repository. The lab repo and `.github` reuse the same numbers
 for different issues.
 
-Open epics are closed the way their own framework requires. A finite epic whose
-remaining children are all closed as not planned is closed as not planned, with
-a comment pointing to this epic. Its unwritten retrospective is not authored.
+An open epic whose remaining children all close may close through the rollup,
+as completed; that is acceptable. Its unwritten retrospective is not authored.
 
 The task presents its classification to the human before it closes anything.
 Closes are outward-facing, so the human confirms each batch.
@@ -426,15 +435,13 @@ Closes are outward-facing, so the human confirms each batch.
     rebuild runs there. `nativeha-ubuntu` may run on either host.
   - **Baseline:** `rdqm-rhel` last passed a cold rebuild on 2026-10-14 (#1475,
     #1497), so the gate is reachable today.
-  - **Leftover-mention check:** a `vrg-git grep` for `pcmk`, `pdrbd`,
-    `pacemaker-san`, `pacemaker-drbd`, `PCMK`, `PDRBD` and the SAN role names,
-    excluding the historical paths and the RDQM-owned paths in §4.3, returns
-    nothing beyond the §4.6 boundary, with one named exception: the PCMK panel
-    helpers kept in `clusterboard.py` for the dashboard rework (§4.1). Those
-    helpers are known to be PCMK-bound: `_PCMK_SEL`, and queries for the
-    `cluster_iscsi_sessions` and `cluster_fence_count` metrics, which nothing
-    emits once the collector is gone. Each remaining hit is listed with its
-    reason in the validation comment.
+  - **Leftover-mention check (once):** a `vrg-git grep` for `pcmk`, `pdrbd`,
+    `pacemaker-san`, `pacemaker-drbd`, `PCMK`, `PDRBD`, `clusterstate` and the
+    SAN role names, excluding the historical paths and the RDQM-owned paths in
+    §4.3, returns nothing beyond the §4.6 boundary, the PCMK panel helpers kept
+    in `clusterboard.py` (§4.1) and the historical names in
+    `retired_boxes.py`. Each remaining hit is listed with its reason in the
+    validation comment.
 
 ## 7. Left to the builder
 
