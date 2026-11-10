@@ -690,8 +690,8 @@ outside the §4.6 boundary. The known ones:
     - the guard tests, which name removed paths or stacks to assert they are
       gone: `tests/test_no_pcmk_mentions.py` itself,
       `tests/test_three_stacks.py`, `tests/test_ansible_retained_only.py`,
-      `tests/test_retained_mqsc_templates.py` and
-      `tests/test_retired_boxes.py`.
+      `tests/test_retained_mqsc_templates.py`, and `tests/test_cli_box.py`,
+      which holds Task 6b's `test_removed_boxes_are_retired`.
 - [ ] **Step 2: Run** `vrg-container-run -- vrg-validate`. Expected: FAIL.
 - [ ] **Step 3: Rewrite the hits.** Help examples name `nativeha-ubuntu`.
 - [ ] **Step 4: Validate.** Expected: green.
@@ -751,7 +751,7 @@ the lab: the macOS Lima VM and the cloud x86 VM.
 
 - [ ] **Precondition:** Tasks 6b and 6c are merged, and the host's checkout is
   on `develop` at or after both.
-- [ ] **Step 0:** Run `virsh list --all`. Expected: no guest of a removed stack
+- [ ] **Step 0:** Before the networks come down, run `virsh list --all`. Expected: no guest of a removed stack
   (`pcmk-*`, `pdrbd-*`, `san-*`). If one is listed, the Task 6a teardown
   precondition was missed; stop and report it, rather than removing it here.
 - [ ] **Step 1:** Run `lab/scripts/net-down.sh net-san-a net-san-b`. Expected:
