@@ -30,7 +30,7 @@ stacks.
 
 ## 2. Goals, non-goals, anti-goals
 
-**Goals**
+### Goals
 
 - G1. `develop` is the lab. The only supported usage is cloning the repo and
   running `uv run mqlab` from the checkout. There are no versions, no tags, no
@@ -42,7 +42,7 @@ stacks.
   that exists only for removed functionality is closed as not planned, with a
   reason.
 
-**Non-goals**
+### Non-goals
 
 - Rewriting history. Specs, plans, reports and retrospectives under `docs/specs`,
   `docs/plans`, `docs/reports` and `docs/superpowers`, and the epics in `.github`,
