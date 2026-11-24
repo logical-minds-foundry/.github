@@ -19,3 +19,16 @@ jobs:
     secrets:
       APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
       APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
+
+  # The daily audit of agent merges (epic vergil-project/.github#1384). It
+  # runs after the config job, but a failing config job does not skip it.
+  agent-audit:
+    needs: github-config
+    if: ${{ !cancelled() }}
+    uses: vergil-project/vergil-actions/.github/workflows/ops-agent-audit.yml@v2.1
+    permissions:
+      contents: read
+    # Passed by name, not inherit: the reusable workflow is in another org.
+    secrets:
+      APP_CLIENT_ID: ${{ secrets.APP_CLIENT_ID }}
+      APP_PRIVATE_KEY: ${{ secrets.APP_PRIVATE_KEY }}
